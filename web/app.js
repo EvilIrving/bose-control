@@ -51,7 +51,6 @@ import { setUnverified, unverifiedOn } from "./experimental.js";
 import { chip, chips, fillRows, pane } from "./ui.js";
 import { linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
-import { artIcon, renderArtRow } from "./art.js";
 import {
   LANG_NAMES,
   SPATIAL_OPTIONS,
@@ -93,7 +92,6 @@ const ui = {
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
   diag: $("diag"),
-  art: $("art-row"),
   unverified: $("unverified"),
   toggles: $("toggles"),
   standby: $("standby"),
@@ -331,16 +329,10 @@ function paintAll() {
     deviceMenu.close(false);
     ui.status.textContent = "";
     ui.meta.textContent = "";
-    renderArtRow(ui.art, { name: "", battery: [] });
     return;
   }
   ui.status.textContent = state.name || link.name || "";
   ui.meta.textContent = brandLabelOf(state.name || link.name);
-  renderArtRow(ui.art, {
-    name: state.name || link.name || "",
-    brand: brandForName(state.name || link.name)?.id ?? getBrand(),
-    battery: state.battery,
-  });
   if (deviceMenu.isOpen()) renderDeviceMenu();
   renderInfo();
   session?.render?.();
@@ -397,7 +389,7 @@ function renderHub() {
 
     if (live) card.classList.add("active");
 
-    card.append(artIcon(peer.name, peer.brand), name, tag, meta);
+    card.append(name, tag, meta);
     card.addEventListener("click", () => {
       if (sessionLive() && state.selected === peer.address) {
         setPage("device");

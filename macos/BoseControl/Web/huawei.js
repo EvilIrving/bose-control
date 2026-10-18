@@ -293,7 +293,7 @@ export class HuaweiHeadset {
       case: parts[2],
       charging: charging.length >= 3 ? charging.reduce((sum, v) => sum + (v === 1 ? 1 : 0), 0) : 0,
     };
-    // 示意图认「左 / 盒 / 右」这个顺序
+    // 电量这一行认「左 / 盒 / 右」这个顺序
     this.state.battery = this.batteryRows(packet);
   }
 

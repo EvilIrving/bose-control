@@ -632,9 +632,8 @@ section h2 {
   gap: 0.25rem;
   align-content: start;
   width: 100%;
-  min-height: 6.5rem;
-  /* 右边留出图标的宽度，名字不会压到图标上 */
-  padding: 1rem 3.2rem 1rem 1rem;
+  min-height: 5.2rem;
+  padding: 1rem;
   border: 1px solid var(--border);
   border-radius: var(--radius-xl);
   background: var(--card);
@@ -917,69 +916,4 @@ input.text:focus {
   #info {
     max-width: 34rem;
   }
-}
-
-/* 耳机示意图：图标内联在 HTML 里，颜色跟主题走 */
-.art-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 1.6rem;
-  padding: 0.2rem 0.2rem 0.6rem;
-  color: var(--muted-foreground);
-}
-
-.art-row .art-slot {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  gap: 0.15rem;
-  min-width: 3.2rem;
-}
-
-.art-row svg {
-  width: 2.6rem;
-  height: 2.6rem;
-  display: block;
-}
-
-.art-row b {
-  color: var(--foreground);
-  font-size: 0.85rem;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-}
-
-/* 一个图形下面的几段电量：L / R / C */
-.art-row .art-levels {
-  display: flex;
-  gap: 0.55rem;
-  font-variant-numeric: tabular-nums;
-}
-
-.art-row .art-levels span {
-  display: flex;
-  align-items: baseline;
-  gap: 0.14rem;
-}
-
-.art-row .art-levels i {
-  color: var(--muted-foreground);
-  font-style: normal;
-  font-size: 0.66rem;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-}
-
-.peer-card .peer-art {
-  position: absolute;
-  top: 0.85rem;
-  right: 0.95rem;
-  color: var(--muted-foreground);
-  opacity: 0.9;
-}
-
-.peer-card .peer-art svg {
-  width: 1.6rem;
-  height: 1.6rem;
-  display: block;
 }

@@ -177,7 +177,7 @@ export function decodeBattery(payload) {
   return rows;
 }
 
-// 协议 id -> 宿主 state.battery 的 component：示意图按 0 左 / 1 盒 / 2 右 渲染。
+// 协议 id -> 宿主 state.battery 的 component：电量按 0 左 / 1 盒 / 2 右 显示。
 const BATTERY_COMPONENT = { 1: 0, 2: 2, 3: 1 };
 
 // 电量行按宿主的 component 顺序排好；不认识的 id 直接丢掉。

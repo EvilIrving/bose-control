@@ -15,7 +15,7 @@ Bose Connector：不登录、不联网，用蓝牙直连耳机的一个页面 + 
 
 已验证真机：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号靠「谁回包就显示谁」自动适配。
 
-`npm test` 现在 106 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
+`npm test` 现在 100 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
 
 ## 我对 agent 的要求
 
@@ -51,13 +51,12 @@ sh scripts/sync-web.sh
 - 中英文都来自官方 APK 的 `res/values` / `res/values-zh-rCN` 或官方 App 实际显示。新增一条就要两条都有。
 - 连接错误由 `web/link.js` 统一成代码（`idle` / `off` / `denied` / `noproto` / `lost` …），原生端只上报错误码，不拼中文。每条提示 10 字以内，窄屏单行不换行。
 
-### 3. 图标只用 Tabler Icons 内联
+### 3. 界面不放图标
 
-`web/art.js` 里是 Tabler 的 `headphones`、`device-airpods`、`device-airpods-case`（MIT，见 `THIRD_PARTY_NOTICES.md`）。
+用户明确要求过：耳机示意图删掉，品牌 logo 也不要（企业商标不能随手分发，自己画更不行）。`web/art.js` 已删，别再加回来。
 
-- 禁止自己画、禁止自己拼。
-- 禁止用各家官方渲染图 / press 图（编辑用途授权，不能随 App 分发）。
-- 带充电仓的只画仓；头戴只画一只头戴；耳塞默认画一副。列表卡片上不写「左耳 / 右耳」，细节留在设备页。
+- 设备列表用状态点表示连接态：绿 = 连着，灰 = 没连；「已连接 / 未连接」只留在 `title` / `aria-label`。
+- 电量是一行小字：设备页跟在名字右边，设备中心写在方块底部，只有真读到的那台才写。
 
 ### 4. 能力按回包渲染，不按型号写死
 
@@ -120,7 +119,6 @@ web/ 页面（无构建、ES module）
  ├─ bridge.js     浏览器 → server.py 的 WebSocket 串口桥
  ├─ native.js     原生桥调用（NativeBLE / messageHandlers）
  ├─ labels.js     中英文案（唯一来源）
- ├─ art.js        耳机示意图
  ├─ menu.js       下拉（键盘 / 点外关闭）
  ├─ ui.js         chip / 行 / 面板小工具
  ├─ link.js       错误码 → 提示
@@ -242,7 +240,7 @@ web/ 页面（无构建、ES module）
 改页面：
 
 ```bash
-npm test                      # 106 条，含真机帧与传输层
+npm test                      # 100 条，含真机帧与传输层
 sh scripts/sync-web.sh        # 然后 git status 必须只剩预期改动
 ```
 
