@@ -1,0 +1,84 @@
+name: testflight
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  upload:
+    name: archive + upload to testflight
+    runs-on: macos-latest
+    env:
+      ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+      ASC_KEY: ${{ secrets.ASC_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: 检查签名所需 secrets
+        run: |
+          missing=""
+          [ -z "$ASC_KEY_ID" ] && missing="$missing ASC_KEY_ID"
+          [ -z "$ASC_ISSUER_ID" ] && missing="$missing ASC_ISSUER_ID"
+          [ -z "$ASC_KEY" ] && missing="$missing ASC_KEY"
+          if [ -n "$missing" ]; then
+            echo "::error::缺少 secrets:$missing（App Store Connect API Key，见 README 的 iOS 发布一节）"
+            exit 1
+          fi
+
+      - name: web 资源必须已同步
+        run: |
+          sh scripts/sync-web.sh
+          if ! git diff --exit-code --stat; then
+            echo "::error::ios/BoseControl/Web 与 web/ 不一致，本地跑 scripts/sync-web.sh 后一起提交"
+            exit 1
+          fi
+
+      - name: 写入 API Key
+        run: |
+          mkdir -p ~/private_keys
+          printf '%s' "$ASC_KEY" > "$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8"
+          chmod 600 "$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8"
+
+      - name: archive
+        run: |
+          xcodebuild -project ios/BoseControl.xcodeproj -scheme BoseControl \
+            -configuration Release -destination 'generic/platform=iOS' \
+            -archivePath build/BoseControl.xcarchive \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID" \
+            CURRENT_PROJECT_VERSION="$GITHUB_RUN_NUMBER" \
+            archive
+
+      - name: export ipa
+        run: |
+          xcodebuild -exportArchive \
+            -archivePath build/BoseControl.xcarchive \
+            -exportPath build/export \
+            -exportOptionsPlist ios/ExportOptions.plist \
+            -allowProvisioningUpdates \
+            -authenticationKeyPath "$HOME/private_keys/AuthKey_$ASC_KEY_ID.p8" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER_ID"
+
+      - name: upload to TestFlight
+        run: |
+          xcrun altool --upload-app \
+            -f build/export/BoseControl.ipa \
+            -t ios \
+            --apiKey "$ASC_KEY_ID" \
+            --apiIssuer "$ASC_ISSUER_ID" \
+            --verbose
+
+      - uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: ios-ipa
+          path: build/export/*.ipa
+          if-no-files-found: warn

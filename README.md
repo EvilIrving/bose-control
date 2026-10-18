@@ -28,6 +28,26 @@ python3 server.py
 
 Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Team 后真机安装。审核按硬件配套工具交：备注型号，附一段连接改降噪的视频。
 
+### 装到别人 iPhone 上（三条路）
+
+| 方式 | 使用者要做什么 | 成本 |
+| --- | --- | --- |
+| **TestFlight**（推荐） | 点邀请链接直接装，不用电脑 | 开发者账号，已配好 CI |
+| 自己用 Xcode 签 | 装 Xcode、填自己 Apple ID，**7 天重签一次** | 免费 |
+| App Store | 搜到即装 | 需审核 |
+
+**TestFlight 自动发布**：`.github/workflows/testflight.yml`，打 `v*` 标签或手动触发。需要在仓库 secrets 里放三样东西（App Store Connect → Users and Access → Integrations → Team Keys 生成）：
+
+| secret | 说明 |
+| --- | --- |
+| `ASC_KEY_ID` | API Key 的 Key ID |
+| `ASC_ISSUER_ID` | Issuer ID |
+| `ASC_KEY` | `.p8` 文件的完整内容 |
+
+前提：App Store Connect 里先建好 App 记录，Bundle ID 与工程一致（当前 `cain.com.bosecontrol`，Team `QZZ878S3NS`）。构建号自动用 CI 的 run number，版本号取工程的 `MARKETING_VERSION`。
+
+**自己签**：Xcode 打开 `ios/BoseControl.xcodeproj` → Target 的 Signing 选自己的 Team（Bundle ID 改成自己的）→ 连上 iPhone Run。免费账号 7 天过期重签，付费账号一年。
+
 ```bash
 xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 ```
