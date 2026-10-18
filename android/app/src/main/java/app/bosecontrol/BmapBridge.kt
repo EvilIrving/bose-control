@@ -89,7 +89,10 @@ class BmapBridge(
                     "\",\"connected\":" + connected + "}"
             )
         }
-        js("onDeviceList('[" + rows.joinToString(",") + "]')")
+        val json = "[" + rows.joinToString(",") + "]"
+        // 这一整串要塞进单引号里执行，名字里的 ' 和 \ 必须先转义
+        val safe = json.replace("\\", "\\\\").replace("'", "\\'")
+        js("onDeviceList('$safe')")
     }
 
     /** 系统认为正在连着的外设地址（GATT + 各音频 profile）。 */

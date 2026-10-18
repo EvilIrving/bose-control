@@ -40,7 +40,7 @@ html:not([data-theme="shadcn"]) section h2 {
 html:not([data-theme="shadcn"]) .chip,
 html:not([data-theme="shadcn"]) .levels button {
   border: 1px solid var(--line);
-  border-radius: 0.8rem;
+  border-radius: 1.15rem;
   background: var(--fill);
   color: var(--fg);
   padding-left: 0.95rem;

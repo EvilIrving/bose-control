@@ -332,7 +332,7 @@ function paintAll() {
   ui.goText.textContent = on ? t("disconnect") : t("connect");
   ui.goList.classList.toggle("busy", state.busy);
   // 有设备中心时，选设备靠列表；浏览器 / iOS / Android 还得靠这个按钮
-  ui.goList.hidden = hubReady();
+  ui.goList.hidden = hubReady() && (state.peers ?? []).length > 0;
   ui.goListText.textContent = t("connect");
   ui.back.hidden = !hubReady() || page !== "device";
   ui.deviceTrigger.hidden = !on;
