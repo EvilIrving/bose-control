@@ -65,6 +65,7 @@ export const LABELS = {
   btOff: { zh: "已关闭", en: "Off" },
   btNone: { zh: "不可用", en: "Unavailable" },
   lastError: { zh: "上次错误", en: "Last error" },
+  location: { zh: "定位", en: "Location" },
 
   create: { zh: "新建模式", en: "New Mode" },
   edit: { zh: "编辑模式", en: "Edit Mode" },

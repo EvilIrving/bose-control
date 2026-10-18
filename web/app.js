@@ -594,8 +594,11 @@ function renderDiag() {
     ["WebView", `Chromium ${chrome}`],
     [t("bridge"), hasNative() ? "OK" : "—"],
     [t("btState"), bt],
-    [t("lastError"), ble.lastError || "—"],
   ];
+  if (env && typeof env.loc !== "undefined") {
+    rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
+  }
+  rows.push([t("lastError"), ble.lastError || "—"]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
   fillRows(ui.diag, rows);
 }
@@ -1217,3 +1220,4 @@ if (!navigator.bluetooth && !hasNative()) {
   state.link = "unsupported";
 }
 renderAll();
+if (hasNative()) connect();

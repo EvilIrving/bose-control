@@ -55,7 +55,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = .black
+        view.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
         let uc = WKUserContentController()
         for name in ["bleScan", "sendData", "bleDisconnect"] {
             uc.add(self, name: name)

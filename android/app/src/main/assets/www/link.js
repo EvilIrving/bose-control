@@ -11,6 +11,7 @@ export const LINK_TEXT = {
   noproto: { zh: "设备不支持", en: "Device not supported" },
   failed: { zh: "没连上，再试一次", en: "Not connected, try again" },
   lost: { zh: "请重新连接", en: "Reconnect please" },
+  location: { zh: "需要开启定位服务", en: "Turn on location" },
 };
 
 const LINK_BY_CODE = {
@@ -30,6 +31,7 @@ const LINK_BY_CODE = {
   notify: "noproto",
   refused: "refused",
   scan: "failed",
+  location: "location",
   dropped: "refused",
   connect: "failed",
   write: "failed",

@@ -3,6 +3,7 @@ package app.bosecontrol
 import android.Manifest
 import android.content.pm.PackageManager
 import android.graphics.Color
+import android.location.LocationManager
 import android.os.Build
 import android.os.Bundle
 import android.view.View
@@ -19,12 +20,26 @@ class MainActivity : ComponentActivity() {
 
     private var pendingScan = false
 
-    private val btPermissions: Array<String>
-        get() = if (Build.VERSION.SDK_INT >= 31) {
-            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
-        } else {
-            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+    // vivo / OPPO / 小米 等 ROM 会把 BLE 扫描额外挂在「定位」上，12+ 也要定位权限
+    private val oemNeedsLocation: Boolean
+        get() = Build.VERSION.SDK_INT >= 31 && OEM_NEEDS_LOCATION.any {
+            Build.MANUFACTURER.contains(it, ignoreCase = true) || Build.BRAND.contains(it, ignoreCase = true)
         }
+
+    private val btPermissions: Array<String>
+        get() {
+            if (Build.VERSION.SDK_INT < 31) return arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+            val base = arrayOf(
+                Manifest.permission.BLUETOOTH_SCAN,
+                Manifest.permission.BLUETOOTH_CONNECT,
+            )
+            return if (oemNeedsLocation) base + Manifest.permission.ACCESS_FINE_LOCATION else base
+        }
+
+    fun locationEnabled(): Boolean {
+        val lm = getSystemService(LocationManager::class.java) ?: return false
+        return lm.isLocationEnabled
+    }
 
     private val ask = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
@@ -79,6 +94,10 @@ class MainActivity : ComponentActivity() {
             return
         }
         ask.launch(perms)
+    }
+
+    companion object {
+        private val OEM_NEEDS_LOCATION = listOf("vivo", "oppo", "realme", "oneplus", "xiaomi", "redmi", "huawei", "honor", "meizu")
     }
 
     override fun onResume() {

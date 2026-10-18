@@ -65,7 +65,8 @@ class BmapBridge(
             else -> 2
         }
         val bonded = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
-        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded}"
+        val loc = if (activity.locationEnabled()) 1 else 0
+        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded,\"loc\":$loc,\"oem\":\"${Build.MANUFACTURER}\"}"
     }
 
     fun scanInternal() {
@@ -111,7 +112,7 @@ class BmapBridge(
             override fun onScanFailed(errorCode: Int) {
                 log("scan failed $errorCode")
                 settle()
-                fail("scan")
+                fail(if (!activity.locationEnabled()) "location" else "scan")
             }
         }
         scanCallback = cb
