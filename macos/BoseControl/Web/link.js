@@ -8,7 +8,7 @@ export const LINK_TEXT = {
   refused: "耳机被别的设备连着",
   noproto: "设备不支持",
   failed: "没连上，再试一次",
-  lost: "连接已断开，重连",
+  lost: "请重新连接",
 };
 
 const LINK_BY_CODE = {
