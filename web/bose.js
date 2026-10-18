@@ -270,6 +270,7 @@ function bandRow(band) {
 
 function renderEq() {
   pane(ui.eq, state.eq.length > 0);
+  ui.eq.className = "";
   ui.eq.innerHTML = "";
   for (const band of state.eq) ui.eq.appendChild(bandRow(band));
 }
@@ -439,10 +440,28 @@ function renderStandby() {
   );
 }
 
+function applyCfg(reply) {
+  const cfg = parseAudioSettings(reply.payload);
+  if (!cfg) return;
+  state.cfg = cfg;
+  state.hasAudioSettings = true;
+  state.channel15 = false;
+  state.cnc = { steps: 11, step: cfg.cnc, total: 11, enabled: true };
+  refresh();
+}
+
+function applyCnc(reply) {
+  const cnc = parseCnc(reply.payload);
+  if (!cnc) return;
+  state.cnc = cnc;
+  if (state.hasAudioSettings && state.cfg.cnc != null) state.cnc.step = state.cfg.cnc;
+  refresh();
+}
+
 async function loadDevice() {
   retries = [];
   // 第一批：屏幕上立刻要看的东西。彼此不依赖，一起飞，屏幕不再等全量读完才出内容。
-  const [versionReply, cfgReply, cncReply] = await Promise.all([
+  const [versionReply] = await Promise.all([
     tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", READ_TIMEOUT),
     read(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", (reply) => {
       state.info.product = parseProductId(reply.payload);
@@ -460,27 +479,14 @@ async function loadDevice() {
     read(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡", (reply) => {
       state.eq = parseEq(reply.payload);
     }),
-    tryAsk(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", READ_TIMEOUT),
-    tryAsk(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", READ_TIMEOUT),
+    read(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", applyCfg),
+    read(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", applyCnc),
     loadModes(),
   ]);
   log(versionReply ? "init-ok" : "init-silent");
 
   // 音效设置和降噪都能回的时候，降噪档位以音效包为准
-  state.hasAudioSettings = false;
-  if (cfgReply) {
-    const cfg = parseAudioSettings(cfgReply.payload);
-    if (cfg) {
-      state.cfg = cfg;
-      state.hasAudioSettings = true;
-      state.channel15 = false;
-      state.cnc = { steps: 11, step: cfg.cnc, total: 11, enabled: true };
-    }
-  }
-  if (cncReply) {
-    state.cnc = parseCnc(cncReply.payload);
-    if (state.hasAudioSettings && state.cfg.cnc != null) state.cnc.step = state.cfg.cnc;
-  }
+  state.hasAudioSettings = Boolean(state.hasAudioSettings);
 
   refresh();
 

@@ -1,3 +1,4 @@
+import { LocalBridge } from "./bridge.js";
 import { fromHex, hasNative, nativeCall, toHex } from "./native.js";
 
 // 同时最多几条请求在途。耳机对同一条命令只回一个包，所以窗口不能开太大，
@@ -12,6 +13,7 @@ export class HeadsetLink {
     this.device = null;
     this.server = null;
     this.char = null;
+    this.bridge = null;
     this.link = "ble";
     this.nativeOn = false;
     this.pending = new Map();
@@ -29,6 +31,7 @@ export class HeadsetLink {
   }
 
   get connected() {
+    if (this.bridge) return this.bridge.open;
     if (this.nativeOn) return this.nativeOn;
     return Boolean(this.server?.connected && this.char);
   }
@@ -67,6 +70,21 @@ export class HeadsetLink {
 
   async connect({ acceptAll = false, address = null, transport = null, channels = [], services = [] } = {}) {
     this.codec.reset?.();
+    // 浏览器里没有原生桥，串口只能交给本机 server.py 代开
+    if (transport === "spp" && !hasNative()) {
+      const bridge = new LocalBridge();
+      bridge.onData = (bytes) => this.handleNotify(bytes);
+      bridge.onClose = () => {
+        this.bridge = null;
+        this.rejectAll(new Error("蓝牙已断开"));
+        this.onDisconnected?.();
+      };
+      await bridge.connect({ address, channels: channels.length ? channels : [1, 2, 3] });
+      this.bridge = bridge;
+      this.link = "spp";
+      this.device = { name: "HUAWEI" };
+      return;
+    }
     if (hasNative()) {
       this.lastError = "";
       await new Promise((resolve, reject) => {
@@ -101,9 +119,12 @@ export class HeadsetLink {
             channels,
             services,
           };
-          const plain = wants.transport === "ble" && !wants.address && !channels.length && !services.length;
-          if (plain) nativeCall("bleScan");
-          else nativeCall("bleScan", wants);
+          // WKWebView 的桥能收对象；Android 的 JS 接口只吃字符串，走另一个方法名
+          if (globalThis.NativeBLE && typeof globalThis.NativeBLE.bleConnect === "function" && !globalThis.webkit) {
+            nativeCall("bleConnect", JSON.stringify(wants));
+          } else {
+            nativeCall("bleScan", wants);
+          }
         } catch (err) {
           this._connectWait = null;
           clearTimeout(timer);
@@ -161,6 +182,11 @@ export class HeadsetLink {
   }
 
   disconnect() {
+    if (this.bridge) {
+      this.bridge.close();
+      this.bridge = null;
+      return;
+    }
     if (hasNative()) {
       try {
         nativeCall("bleDisconnect", {});
@@ -192,6 +218,10 @@ export class HeadsetLink {
 
   async write(packetBytes) {
     const chunks = this.codec.chunks(packetBytes, this.link);
+    if (this.bridge) {
+      for (const chunk of chunks) this.bridge.send(chunk);
+      return;
+    }
     if (hasNative() && this.nativeOn) {
       for (const chunk of chunks) nativeCall("sendData", toHex(chunk));
       return;

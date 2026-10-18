@@ -23,3 +23,6 @@ __pycache__/
 
 # macOS
 .DS_Store
+
+# local bluetooth bridge binary
+tools/bt-bridge

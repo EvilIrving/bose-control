@@ -64,7 +64,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "sendData", "bleDisconnect", "setBrand", "listDevices"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices"] {
             uc.add(self, name: name)
         }
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -102,10 +102,18 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "bleScan":
-            let body = message.body as? [String: Any]
-            let transport = body?["transport"] as? String ?? "ble"
-            let address = body?["address"] as? String
-            let channels = (body?["channels"] as? [Int] ?? []).map { BluetoothRFCOMMChannelID($0) }
+            bmap.scanAndConnect(transport: "ble", address: nil, channels: [])
+        case "bleConnect":
+            // 页面统一发 JSON 字符串，Android 的 JS 接口只认字符串，这边跟着一起
+            var body: [String: Any] = [:]
+            if let text = message.body as? String, let data = text.data(using: .utf8) {
+                body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            } else if let dict = message.body as? [String: Any] {
+                body = dict
+            }
+            let transport = body["transport"] as? String ?? "ble"
+            let address = body["address"] as? String
+            let channels = (body["channels"] as? [Int] ?? []).map { BluetoothRFCOMMChannelID($0) }
             bmap.scanAndConnect(transport: transport, address: address, channels: channels)
         case "sendData":
             if let hex = message.body as? String { bmap.send(hex: hex) }
@@ -142,7 +150,9 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     window.NativeBLE = {
       transports: ["ble", "spp"],
       hub: true,
-      bleScan: function (payload) { window.webkit.messageHandlers.bleScan.postMessage(payload || {}); },
+      platform: function () { return JSON.stringify({ platform: "macos", transports: ["ble", "spp"], hub: true }); },
+      bleScan: function () { window.webkit.messageHandlers.bleScan.postMessage({}); },
+      bleConnect: function (payload) { window.webkit.messageHandlers.bleConnect.postMessage(String(payload)); },
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
       bleDisconnect: function () { window.webkit.messageHandlers.bleDisconnect.postMessage({}); },
       listDevices: function () { window.webkit.messageHandlers.listDevices.postMessage({}); },

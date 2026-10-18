@@ -44,7 +44,8 @@ import {
 } from "./bmap.js";
 import { HeadsetLink } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandForName, brandsHere } from "./brands.js";
+import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, setBridgeAvailable } from "./brands.js";
+import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
 import { chip, chips, fillRows, pane } from "./ui.js";
 import { batteryText, linkOf, linkText } from "./link.js";
@@ -86,6 +87,7 @@ const ui = {
   voice: $("voice"),
   behaviour: $("behaviour"),
   lang: $("lang"),
+  theme: $("theme"),
   settings: $("settings"),
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
@@ -194,6 +196,53 @@ function renderInfo() {
   pane(ui.info, rows.length > 0);
 }
 
+const THEMES = ["classic", "shadcn"];
+const THEME_KEY = "bose.theme";
+
+function currentTheme() {
+  const fromUrl = new URLSearchParams(location.search).get("theme");
+  if (THEMES.includes(fromUrl)) return fromUrl;
+  try {
+    const saved = localStorage.getItem(THEME_KEY);
+    if (THEMES.includes(saved)) return saved;
+  } catch {
+    /* storage 不可用时用默认 */
+  }
+  return "classic";
+}
+
+function setTheme(id) {
+  if (!THEMES.includes(id)) return;
+  try {
+    localStorage.setItem(THEME_KEY, id);
+  } catch {
+    /* 忽略写入失败 */
+  }
+  document.documentElement.dataset.theme = id;
+}
+
+function applyTheme() {
+  const id = currentTheme();
+  if (id === "classic") document.documentElement.removeAttribute("data-theme");
+  else document.documentElement.dataset.theme = id;
+  return id;
+}
+
+function renderTheme() {
+  chips(
+    ui.theme,
+    [
+      { key: "classic", label: t("themeClassic") },
+      { key: "shadcn", label: t("themeShadcn") },
+    ],
+    currentTheme(),
+    (id) => {
+      setTheme(id);
+      renderTheme();
+    },
+  );
+}
+
 function renderLanguage() {
   chips(ui.lang, LANG_NAMES.map((item) => ({ key: item.id, label: item.native })), getLang(), (id) => {
     setLang(id);
@@ -204,6 +253,7 @@ function renderLanguage() {
 
 function renderSettings() {
   renderLanguage();
+  renderTheme();
   session?.renderSettings?.();
   renderDiag();
 }
@@ -305,7 +355,21 @@ function paintAll() {
 // 有原生设备中心（目前是 macOS）就直接列出系统里已配对的耳机，点一台控一台；
 // 没有的话退回「品牌芯片 + 连接」的老路。
 function hubReady() {
-  return globalThis.NativeBLE?.hub === true;
+  return nativeHub() || bridgeAvailable();
+}
+
+// 设备列表：原生端给，或者本机串口桥给
+async function loadPeers() {
+  if (nativeHub()) {
+    try {
+      nativeCall("listDevices");
+    } catch {
+      /* 老版本桥没有这个方法 */
+    }
+    return;
+  }
+  if (!bridgeAvailable()) return;
+  onDeviceList(JSON.stringify(await LocalBridge.list()));
 }
 
 function peerBattery(peer) {
@@ -448,12 +512,7 @@ function disconnect() {
 }
 
 function refreshPeers() {
-  if (!hubReady()) return;
-  try {
-    nativeCall("listDevices");
-  } catch {
-    /* 老版本桥没有这个方法 */
-  }
+  loadPeers();
 }
 
 // 顶栏下拉：正在连的那台打勾，选别的直接换过去
@@ -545,6 +604,7 @@ link.onDisconnected = () => {
   renderAll();
 };
 
+applyTheme();
 applyLabels();
 window.__boseApp = true;
 if (!navigator.bluetooth && !hasNative()) {
@@ -558,4 +618,11 @@ if (hasNative()) {
   } else {
     connect();
   }
+} else {
+  // 浏览器：本机跑着 server.py 就有串口桥，华为这类耳机也能控
+  LocalBridge.reachable().then((up) => {
+    setBridgeAvailable(up);
+    if (up) loadPeers();
+    renderAll();
+  });
 }

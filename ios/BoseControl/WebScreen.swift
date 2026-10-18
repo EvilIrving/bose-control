@@ -57,7 +57,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
-        for name in ["bleScan", "sendData", "bleDisconnect"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect"] {
             uc.add(self, name: name)
         }
         let conf = WKWebViewConfiguration()
@@ -120,7 +120,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
-        case "bleScan":
+        case "bleScan", "bleConnect":
             ble.scanAndConnect()
         case "sendData":
             if let hex = message.body as? String { ble.send(hex: hex) }

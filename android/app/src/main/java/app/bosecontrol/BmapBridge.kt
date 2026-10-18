@@ -39,10 +39,72 @@ class BmapBridge(
     private var scanCallback: ScanCallback? = null
     private var scanTimeout: Runnable? = null
 
+    private var wantTransport = "ble"
+    private var wantAddress: String? = null
+    private var wantChannels = listOf(1, 2, 3)
+
     @JavascriptInterface
     fun bleScan() {
+        wantTransport = "ble"
+        wantAddress = null
         main.post { activity.requestBtThenScan() }
     }
+
+    /** 页面按品牌选好路线：ble 走 GATT 扫描，spp 走指定设备的蓝牙串口。 */
+    @JavascriptInterface
+    fun bleConnect(payload: String) {
+        val json = runCatching { org.json.JSONObject(payload.ifBlank { "{}" }) }.getOrNull()
+        wantTransport = json?.optString("transport", "ble") ?: "ble"
+        wantAddress = json?.optString("address", "")?.takeIf { it.isNotEmpty() }
+        val channels = json?.optJSONArray("channels")
+        if (channels != null) {
+            val list = mutableListOf<Int>()
+            for (i in 0 until channels.length()) list.add(channels.optInt(i, 0))
+            if (list.isNotEmpty()) wantChannels = list
+        }
+        main.post { activity.requestBtThenScan() }
+    }
+
+    /** 已配对设备列表，页面自己做品牌归类。 */
+    @JavascriptInterface
+    fun listDevices() {
+        val ad = adapter
+        if (ad == null) {
+            js("onDeviceList('[]')")
+            return
+        }
+        val live = connectedAddresses()
+        val rows = mutableListOf<String>()
+        for (device in ad.bondedDevices.orEmpty()) {
+            val name = device.name ?: continue
+            val address = device.address ?: continue
+            val connected = live.contains(address.lowercase())
+            rows.add(
+                "{\"name\":\"" + escapeJson(name) + "\",\"address\":\"" + escapeJson(address) +
+                    "\",\"connected\":" + connected + "}"
+            )
+        }
+        js("onDeviceList('[" + rows.joinToString(",") + "]')")
+    }
+
+    /** 系统认为正在连着的外设地址（GATT + 各音频 profile）。 */
+    private fun connectedAddresses(): Set<String> {
+        val mgr = activity.getSystemService(BluetoothManager::class.java) ?: return emptySet()
+        val profiles = listOf(
+            BluetoothProfile.GATT,
+            BluetoothProfile.A2DP,
+            BluetoothProfile.HEADSET,
+        )
+        val out = mutableSetOf<String>()
+        for (profile in profiles) {
+            runCatching {
+                mgr.getConnectedDevices(profile).orEmpty().forEach { out.add((it.address ?: "").lowercase()) }
+            }
+        }
+        return out
+    }
+
+    private fun escapeJson(text: String) = text.replace("\\", "\\\\").replace("\"", "\\\"")
 
     @JavascriptInterface
     fun sendData(hex: String) {
@@ -53,6 +115,12 @@ class BmapBridge(
     @JavascriptInterface
     fun bleDisconnect() {
         main.post { close() }
+    }
+
+    /** 页面问平台能力：能走哪几条路、有没有设备中心。 */
+    @JavascriptInterface
+    fun platform(): String {
+        return "{\"platform\":\"android\",\"transports\":[\"ble\",\"spp\"],\"hub\":true}"
     }
 
     /** 诊断用：蓝牙开关状态、已配对 Bose 设备数。 */
@@ -74,6 +142,11 @@ class BmapBridge(
         if (!ad.isEnabled) return fail("off")
         close()
         val mine = ++gen
+        if (wantTransport == "spp") {
+            val target = wantAddress
+            if (target.isNullOrEmpty()) return fail("none")
+            return openSpp(ad, target, mine)
+        }
         val mgr = activity.getSystemService(BluetoothManager::class.java)
         // 已经连在系统上的耳机不会广播，先直接拿现成的 GATT 连接
         val already = mgr?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
@@ -286,6 +359,39 @@ class BmapBridge(
         } else {
             fail("connect")
         }
+    }
+
+    /** 页面指定了设备和端口，按顺序试：标准 SPP UUID 优先，再按端口号反射打开。 */
+    private fun openSpp(ad: BluetoothAdapter, address: String, mine: Int) {
+        val device = ad.getRemoteDevice(address)
+        Thread {
+            val sockets = mutableListOf<BluetoothSocket>()
+            runCatching { sockets.add(device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)) }
+            for (channel in wantChannels) {
+                runCatching {
+                    val method = device.javaClass.getMethod("createInsecureRfcommSocket", Int::class.javaPrimitiveType!!)
+                    val sock = method.invoke(device, channel) as BluetoothSocket
+                    sockets.add(sock)
+                }
+            }
+            for (sock in sockets) {
+                try {
+                    sock.connect()
+                    if (mine != gen) {
+                        runCatching { sock.close() }
+                        return@Thread
+                    }
+                    spp = sock
+                    link = "spp"
+                    sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
+                    connected(device.name ?: "耳机", "spp")
+                    return@Thread
+                } catch (_: Exception) {
+                    runCatching { sock.close() }
+                }
+            }
+            if (mine == gen) fail("spp")
+        }.start()
     }
 
     private fun trySpp(ad: BluetoothAdapter, mine: Int) {

@@ -175,7 +175,7 @@
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "耳机";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "连接 Bose 耳机并调节降噪、均衡等设置。";
@@ -207,7 +207,7 @@
 				ENABLE_RESOURCE_ACCESS_BLUETOOTH = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "耳机";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.utilities";
 				INFOPLIST_KEY_NSBluetoothAlwaysUsageDescription = "连接 Bose 耳机并调节降噪、均衡等设置。";

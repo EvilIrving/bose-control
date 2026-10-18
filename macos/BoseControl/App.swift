@@ -3,7 +3,7 @@ import SwiftUI
 @main
 struct BoseControlApp: App {
     var body: some Scene {
-        Window("耳机", id: "wide") {
+        Window("Bose Connector", id: "wide") {
             WebScreen()
                 .frame(minWidth: 900, minHeight: 720)
         }

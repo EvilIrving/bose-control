@@ -1,4 +1,4 @@
-# bose-control
+# Bose Connector
 
 [![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml)
 
@@ -27,8 +27,9 @@ Controls Bose headphones over BMAP and HUAWEI earbuds over SPP, from the browser
 
 - 返回**不断开**：回到设备中心时那台设备仍连着、方块高亮并带电量，再点它就是回到控制页，不会重连。
 - 要真断开在设置页「耳机操作 → 断开连接」，或者顶栏下拉里的「断开连接」。
-- 顶栏下拉在没有设备中心的平台上（浏览器 / iOS / Android）只列当前这台，加「刷新 / 断开连接」两项；品牌切换还是靠首页的品牌芯片。
-- 设备中心只在能枚举系统配对设备的平台上出现（目前是 macOS）。浏览器 / iOS / Android 上首页是「品牌芯片 + 连接」的老样子。
+- 顶栏下拉在没有设备中心的平台上（浏览器 / iOS / Android）只列当前这台，加「刷新 / 断开连接」两项。
+- 品牌芯片只在能连两个品牌的平台出现（现在只有 macOS）。iPhone 与浏览器上华为那条通道走不通，所以那里连芯片都不显示，原因见下面的「iPhone 上怎么管华为耳机」。
+- 设备中心只在能枚举系统配对设备的平台上出现（目前是 macOS）。浏览器 / iOS / Android 上首页只有一个「连接」按钮。
 
 ## 电脑 Chrome
 
@@ -36,7 +37,11 @@ Controls Bose headphones over BMAP and HUAWEI earbuds over SPP, from the browser
 python3 server.py
 ```
 
-打开打印出来的 `https://127.0.0.1:8443/`。只有 Bose：华为的控制通道是蓝牙串口，Web Bluetooth 只给 GATT。
+打开打印出来的 `https://127.0.0.1:8443/`。
+
+这里还有一条「本机串口桥」：浏览器给不了 SPP，`server.py` 就用 `tools/bt-bridge` 子进程代开 RFCOMM，页面通过 WebSocket 把字节交给它。所以**浏览器里也能控华为**——前提是页面由 `server.py` 提供（`/api/devices` 能通就说明桥在）。没起 server、直接开静态文件时，只有 Bose 的 Web Bluetooth 那条路。
+
+桥的协议很简单：`GET /api/devices` 拿已配对设备，`wss://<同一端口>/bt` 上发 `{open|send|close}`、收 `{ok|data|error}`。
 
 ## iOS
 
@@ -44,7 +49,7 @@ python3 server.py
 
 Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Team 后真机安装。审核按硬件配套工具交：备注型号，附一段连接改降噪的视频。
 
-华为在 iOS 上做不了：系统不把 SPP / RFCOMM 开放给第三方 App，这条不是没写，是写不了。
+华为在 iOS 上做不了：系统不把 SPP / RFCOMM 开放给第三方 App。iPhone 上怎么管华为耳机，见「[iPhone 上怎么管华为耳机](#iphone-上怎么管华为耳机)」。
 
 ### 装到别人 iPhone 上（三条路）
 
@@ -170,7 +175,7 @@ adb logcat -s BOSE
 
 ## 华为（HUAWEI）
 
-设备中心里出现的就是系统里配对过的华为耳机（名字含 `HUAWEI` / `FreeBuds` / `FreeClip` / `FreeLace` / `荣耀`），点一台就连一台；没有设备中心的平台上，首页是「品牌芯片 + 连接」，选 `华为 HUAWEI` 再连。
+目前只有 macOS 版能连华为。设备中心里出现的就是系统里配对过的华为耳机（名字含 `HUAWEI` / `FreeBuds` / `FreeClip` / `FreeLace` / `荣耀`），点一台就连一台；这时顶栏下拉也能直接换到另一台华为耳机。
 
 | | 能不能用 |
 | --- | --- |
@@ -178,6 +183,15 @@ adb logcat -s BOSE
 | Chrome / Edge | 不行：华为的控制口是蓝牙串口，Web Bluetooth 只给 GATT |
 | iOS App | 不行（系统不给第三方 SPP） |
 | Android App | 还没接（`BmapBridge` 只认 Bose） |
+
+### iPhone 上怎么管华为耳机
+
+本项目在 iPhone 上是 Bose 单品牌，没有「切换到华为」这个动作——不是按钮藏起来，是没有通道：华为的控制口是经典蓝牙串口（SPP / RFCOMM），iOS 的 CoreBluetooth 只开放 BLE / GATT，经典蓝牙的数据通道只给 MFi 认证配件（ExternalAccessory），华为耳机不是 MFi。
+
+两条路：
+
+- 用华为自家的「智慧音频」（App Store，iOS 13+，2026-10 仍在更新），连接、音效设置、固件更新都在里面。
+- 在 Mac 上用本项目改一次：设置是直接写进耳机的，跟着耳机走，之后 iPhone 当播放端就行。
 
 已验证机型：HUAWEI FreeClip 2（固件 HarmonyOS 6.0.0.256，型号 BTFT0027）。其他 FreeBuds / FreeClip 走同一套命令，没真机就不写死，能回包才显示。
 

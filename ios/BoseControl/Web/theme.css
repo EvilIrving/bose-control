@@ -1,0 +1,85 @@
+/* 两套外观：
+   - 默认（不加 data-theme）= 经典，就是 2b6e6b1 那版观感：胶囊 chip、白底滑轨、无边框顶栏。
+   - html[data-theme="shadcn"] = 现在这套 shadcn/ui 深色观感，本文件整段不生效。
+   切换入口在设置页「外观」，也可以用 ?theme=shadcn 临时看效果。 */
+html:not([data-theme="shadcn"]) {
+  --bg: #0b0b0b;
+  --fg: #f4f4f4;
+  --dim: #7a7a7a;
+  --line: #2a2a2a;
+  --fill: #171717;
+  --on: #0b0b0b;
+
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--fill);
+  --popover: var(--fill);
+  --muted: var(--fill);
+  --muted-foreground: var(--dim);
+  --border: var(--line);
+  --primary: var(--fg);
+  --primary-foreground: var(--on);
+  --hover: transparent;
+
+  --radius: 999px;
+  --radius-sm: 999px;
+  --radius-md: 999px;
+  --radius-lg: 999px;
+  --radius-xl: 999px;
+}
+
+html:not([data-theme="shadcn"]) section h2 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+html:not([data-theme="shadcn"]) .chip,
+html:not([data-theme="shadcn"]) .levels button {
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--fill);
+  color: var(--fg);
+}
+
+html:not([data-theme="shadcn"]) .chip:hover {
+  background: var(--fill);
+}
+
+html:not([data-theme="shadcn"]) .chip.on,
+html:not([data-theme="shadcn"]) .levels button.on {
+  border-color: var(--fg);
+  background: var(--fg);
+  color: var(--on);
+}
+
+html:not([data-theme="shadcn"]) .chip.on:hover {
+  background: var(--fg);
+}
+
+/* 经典版没有边框卡片，设备信息回到顶栏一行 */
+html:not([data-theme="shadcn"]) #device-trigger {
+  border-color: transparent;
+  background: transparent;
+  padding-left: 0;
+  padding-right: 0;
+}
+
+/* 滑轨：经典版是整条白底，没有圆点 */
+html:not([data-theme="shadcn"]) .track .rail {
+  height: 100%;
+  background: var(--fill);
+  border: 1px solid var(--line);
+}
+
+html:not([data-theme="shadcn"]) .track i {
+  background: var(--fg);
+}
+
+html:not([data-theme="shadcn"]) .track u {
+  display: none;
+}
+
+html:not([data-theme="shadcn"]) .menu {
+  border-radius: 1rem;
+}

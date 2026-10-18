@@ -160,7 +160,7 @@
 				DEVELOPMENT_TEAM = QZZ878S3NS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "耳机";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 0.1.0;
@@ -182,7 +182,7 @@
 				DEVELOPMENT_TEAM = QZZ878S3NS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
-				INFOPLIST_KEY_CFBundleDisplayName = "耳机";
+				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
 				MARKETING_VERSION = 0.1.0;
