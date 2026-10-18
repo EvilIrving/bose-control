@@ -197,6 +197,23 @@ test("parseManufactured reads BCD day month year", () => {
   assert.equal(parseManufactured(Uint8Array.of(0x25, 0x11, 0x20, 0x26)), "2026-11-25");
 });
 
+test("hint stays on one line on a narrow phone", () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const css = readFileSync(join(dir, "../web/styles.css"), "utf8");
+  assert.match(css.match(/#hint \{([^}]*)\}/)[1], /white-space: nowrap/);
+  assert.match(css.match(/#hint \{([^}]*)\}/)[1], /min-height: 1\.4em/);
+  assert.match(css, /body\.idle #hint \{\s*display: block;/);
+
+  const js = readFileSync(join(dir, "../web/app.js"), "utf8");
+  const table = js.match(/const FAIL_TEXT = \{([\s\S]*?)\n\};/)[1];
+  const mapped = [...table.matchAll(/: "([^"]+)"/g)].map((m) => m[1]);
+  const returned = [...js.match(/function failText[\s\S]*?\n\}/)[0].matchAll(/return "([^"]+)"/g)];
+  assert.ok(mapped.length >= 10);
+  for (const text of [...mapped, ...returned.map((m) => m[1])]) {
+    assert.ok(text.length <= 10, `hint too long: ${text}`);
+  }
+});
+
 test("web files are a complete page", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const html = readFileSync(join(dir, "../web/index.html"), "utf8");

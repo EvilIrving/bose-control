@@ -111,16 +111,29 @@ const state = {
   hint: "",
 };
 
+const FAIL_TEXT = {
+  none: "没有找到耳机",
+  off: "蓝牙没打开",
+  bluetooth: "蓝牙没打开",
+  adapter: "蓝牙没打开",
+  denied: "没有蓝牙权限",
+  connect: "连接失败",
+  service: "连接失败",
+  char: "连接失败",
+  write: "连接失败",
+  spp: "连接失败",
+  NotFoundError: "没有找到耳机",
+  NotAllowedError: "没有蓝牙权限",
+  NetworkError: "连接失败",
+};
+
 function failText(err) {
-  const raw = String(err?.message || err || "");
-  const name = err?.name || "";
-  if (raw === "none" || name === "NotFoundError") return "没有找到耳机";
-  if (raw === "off" || raw === "bluetooth") return "蓝牙没打开";
-  if (raw === "denied" || name === "NotAllowedError") return "没有蓝牙权限";
-  if (raw === "connect" || raw === "service" || raw === "char" || name === "NetworkError") return "连接失败";
-  if (raw.includes("Web Bluetooth") || raw === "no native bridge") return "这边连不了蓝牙";
-  if (raw) return "连接失败";
-  return "连接失败";
+  const raw = String(err?.message ?? err ?? "").trim();
+  const known = FAIL_TEXT[raw] || FAIL_TEXT[err?.name];
+  if (known) return known;
+  if (/Web Bluetooth/.test(raw) || raw === "no native bridge") return "这边连不了蓝牙";
+  const clause = raw.split(/[：:，,。；;、！!？?\s]/)[0];
+  return /[\u4e00-\u9fa5]/.test(clause) && clause.length <= 10 ? clause : "连接失败";
 }
 
 function log(line) {
