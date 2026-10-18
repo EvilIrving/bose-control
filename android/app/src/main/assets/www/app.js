@@ -448,6 +448,8 @@ function renderHub() {
 // 上一次设备列表的内容签名：一样的回包不再重画
 let peersSig = null;
 
+let droppedSig = "";
+
 window.onDeviceList = (json) => {
   peerPending = false;
   let rows = [];
@@ -456,7 +458,14 @@ window.onDeviceList = (json) => {
   } catch {
     rows = [];
   }
-  // 原生端只负责把配对设备全给出来，认品牌是这边的事；认不出的（键盘、鼠标、手机）直接丢掉
+  // 原生端只负责把配对设备全给出来，认品牌是这边的事；认不出的（键盘、鼠标、手机）直接丢掉，
+  // 但要在诊断里留一行：少一台时得能分清是原生没给、还是给了但没认上
+  const dropped = rows.filter((peer) => !brandForName(peer.name)).map((peer) => peer.name || peer.address);
+  const droppedNow = dropped.join("\u0000");
+  if (droppedNow !== droppedSig) {
+    droppedSig = droppedNow;
+    if (dropped.length) log(`配对 ${rows.length} 台，认不出：${dropped.join(" / ")}`);
+  }
   state.peers = rows
     .map((peer) => ({ ...peer, brand: brandForName(peer.name)?.id }))
     .filter((peer) => peer.brand);

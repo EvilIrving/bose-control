@@ -92,11 +92,17 @@ class BmapBridge(
         val live = connectedAddresses()
         val peers = ad.bondedDevices.orEmpty()
             .mapNotNull { device ->
-                val name = device.name ?: return@mapNotNull null
                 val address = device.address ?: return@mapNotNull null
+                // 名字可能是空的（只配对过一次、名字没缓存下来），退回别名再退回地址：
+                // 静默丢掉会让首页凭空少一台，也看不出是原生没给还是品牌没认上
+                val name = device.name?.takeIf { it.isNotBlank() }
+                    ?: deviceAlias(device)
+                    ?: address
                 PeerRow(name, address, live.contains(address.lowercase()))
             }
             .sortedWith(peerOrder)
+        // 每一步一行：配了几台、每台叫什么，`adb logcat -s BOSE` 直接看
+        Log.d(TAG, "listDevices bonded=${peers.size} " + peers.joinToString(" | ") { "${it.name}@${it.address}" })
         val json = peers.joinToString(",", "[", "]") { peer ->
             "{\"name\":\"" + escapeJson(peer.name) + "\",\"address\":\"" + escapeJson(peer.address) +
                 "\",\"connected\":" + peer.connected + "}"
@@ -107,6 +113,9 @@ class BmapBridge(
     }
 
     private data class PeerRow(val name: String, val address: String, val connected: Boolean)
+
+    private fun deviceAlias(device: BluetoothDevice): String? =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) device.alias?.takeIf { it.isNotBlank() } else null
 
     // 顺序要稳定：已连接在前，组内按名字自然序（数字按数值比，"QC 2" 在 "QC 10" 前，不分大小写）。
     private val peerOrder = Comparator<PeerRow> { a, b ->
@@ -197,9 +206,11 @@ class BmapBridge(
             ad.isEnabled -> 1
             else -> 2
         }
-        val bonded = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
+        // bonded 是系统里配过的全部设备（页面「已配对设备」用这个数），bose 单独给一份便于对照
+        val bonded = runCatching { ad?.bondedDevices?.size }.getOrNull() ?: -1
+        val bose = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
         val loc = if (activity.locationEnabled()) 1 else 0
-        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded,\"loc\":$loc,\"oem\":\"${Build.MANUFACTURER}\"}"
+        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded,\"bose\":$bose,\"loc\":$loc,\"oem\":\"${Build.MANUFACTURER}\"}"
     }
 
     fun scanInternal() {
