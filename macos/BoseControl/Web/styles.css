@@ -1,0 +1,394 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0b;
+  --fg: #f4f4f4;
+  --dim: #7a7a7a;
+  --line: #2a2a2a;
+  --fill: #171717;
+  --on: #0b0b0b;
+}
+
+* {
+  box-sizing: border-box;
+  -webkit-user-drag: none;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+  overscroll-behavior: none;
+  cursor: default;
+}
+
+body {
+  min-height: 100dvh;
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: "head go";
+  column-gap: 0.75rem;
+  align-items: center;
+  margin-bottom: 1.25rem;
+}
+
+#head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+h1 {
+  flex: 0 100 auto;
+  min-width: 2.5rem;
+  margin: 0;
+  font-size: 1.2rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#go {
+  grid-area: go;
+  align-self: center;
+  min-height: 2.75rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+}
+
+.spin {
+  display: none;
+  width: 1.15rem;
+  height: 1.15rem;
+  border: 2px solid rgba(11, 11, 11, 0.18);
+  border-top-color: var(--on);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+
+#go.busy .spin {
+  display: block;
+}
+
+#go.busy #go-text {
+  display: none;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+body.idle header {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  margin: 0;
+  padding: 0 1.5rem 16vh;
+  gap: 0.9rem;
+}
+
+body.idle #head {
+  display: none;
+}
+
+body.idle #go {
+  min-width: 9.5rem;
+  min-height: 3.4rem;
+  padding: 0.9rem 2rem;
+  font-size: 1.2rem;
+}
+
+#hint {
+  display: none;
+  margin: 0;
+  min-height: 1.4em;
+  color: var(--dim);
+  font-size: 0.95rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+body.idle #hint {
+  display: block;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  background: #f4f4f4;
+  color: var(--on);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+button:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid #f4f4f4;
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.35;
+}
+
+.chips,
+.levels,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.row {
+  align-items: center;
+}
+
+main > * + * {
+  margin-top: 1.1rem;
+}
+
+section h2 {
+  margin: 0 0 0.45rem;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.chip,
+.levels button {
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  font-weight: 500;
+  min-height: 2.75rem;
+}
+
+.chip.on,
+.levels button.on {
+  background: #f4f4f4;
+  color: var(--on);
+  border-color: #f4f4f4;
+}
+
+.levels button {
+  min-width: 2.35rem;
+  padding: 0.55rem 0;
+}
+
+.band {
+  display: grid;
+  grid-template-columns: auto 1fr 2.2rem;
+  gap: 0.7rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.band span {
+  white-space: nowrap;
+}
+
+.band:first-child {
+  margin-top: 0;
+}
+
+.cnc-band {
+  grid-template-columns: 1fr 2.2rem;
+  margin-top: 0;
+}
+
+.track {
+  height: 2.75rem;
+  border-radius: 999px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  background: #f4f4f4;
+  width: 0;
+  pointer-events: none;
+}
+
+.band b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.chev {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 1.5px solid var(--dim);
+  border-bottom: 1.5px solid var(--dim);
+  transform: rotate(45deg) translate(-0.1rem, -0.1rem);
+  transition: transform 0.15s ease;
+}
+
+#device-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-radius: 999px;
+  background: none;
+}
+
+#device-toggle[aria-expanded="true"] .chev {
+  transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
+}
+
+#info {
+  display: grid;
+  gap: 0.5rem;
+  margin: -0.5rem 0 1.1rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+}
+
+#info div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#info span {
+  flex: none;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+#info b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  word-break: break-all;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (min-width: 900px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    height: 100dvh;
+    padding-top: max(1.5rem, env(safe-area-inset-top));
+    padding-right: max(2rem, env(safe-area-inset-right));
+    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+    padding-left: max(2rem, env(safe-area-inset-left));
+    display: flex;
+    flex-direction: column;
+  }
+
+  h1 {
+    font-size: 1.7rem;
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  main > * + * {
+    margin-top: 0;
+  }
+
+  .levels {
+    flex-wrap: nowrap;
+  }
+
+  .levels button {
+    flex: 1;
+    min-width: 0;
+    padding: 0.75rem 0;
+    font-size: 1.05rem;
+  }
+
+  .chip {
+    font-size: 1.05rem;
+    padding: 0.7rem 1.15rem;
+  }
+
+  .track {
+    height: 3rem;
+  }
+
+  .band {
+    grid-template-columns: auto 1fr 2.4rem;
+  }
+
+  .cnc-band {
+    grid-template-columns: 1fr 2.4rem;
+  }
+}

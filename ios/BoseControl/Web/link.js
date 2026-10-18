@@ -1,12 +1,12 @@
 export const LINK_TEXT = {
-  idle: "打开耳机，点连接",
+  idle: "请先连接耳机",
   busy: "正在找耳机",
   off: "需要先开启蓝牙",
   denied: "需要蓝牙权限",
   unsupported: "这边连不了蓝牙",
   notfound: "没找到耳机，再试一次",
   refused: "耳机被别的设备连着",
-  noproto: "这台耳机不支持控制",
+  noproto: "设备不支持",
   failed: "没连上，再试一次",
   lost: "连接已断开，重连",
 };

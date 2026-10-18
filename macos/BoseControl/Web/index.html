@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0b0b0b" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <title>耳机</title>
+    <link rel="apple-touch-icon" href="./icon.png" />
+    <link rel="icon" href="./icon.png" />
+    <link rel="stylesheet" href="./styles.css" />
+    <script>
+      document.addEventListener("gesturestart", (e) => e.preventDefault());
+      document.addEventListener("gesturechange", (e) => e.preventDefault());
+      document.addEventListener("gestureend", (e) => e.preventDefault());
+      document.addEventListener("dblclick", (e) => e.preventDefault());
+      document.addEventListener("contextmenu", (e) => e.preventDefault());
+      document.addEventListener(
+        "click",
+        (e) => {
+          if (window.__boseApp) return;
+          if (e.target && e.target.id === "go") window.NativeBLE && window.NativeBLE.bleScan();
+        },
+        true,
+      );
+    </script>
+  </head>
+  <body>
+    <header>
+      <div id="head">
+        <h1 id="status"></h1>
+        <p id="meta"></p>
+        <button id="device-toggle" type="button" aria-expanded="false" aria-label="设备信息" hidden>
+          <i class="chev" aria-hidden="true"></i>
+        </button>
+      </div>
+      <button id="go" type="button">
+        <span id="go-text">连接</span>
+        <i class="spin" aria-hidden="true"></i>
+      </button>
+      <p id="hint"></p>
+    </header>
+    <div id="info" hidden></div>
+    <main id="controls" hidden>
+      <section>
+        <h2 data-label="modes"></h2>
+        <div id="modes" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="cnc"></h2>
+        <div id="cnc" class="levels"></div>
+      </section>
+      <section>
+        <h2 data-label="eq"></h2>
+        <div id="eq"></div>
+      </section>
+      <section>
+        <h2 data-label="spatial"></h2>
+        <div id="spatial" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="sidetone"></h2>
+        <div id="sidetone" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="others"></h2>
+        <div id="toggles" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="voice"></h2>
+        <div id="voice" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="standby"></h2>
+        <div id="standby" class="chips"></div>
+      </section>
+    </main>
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>

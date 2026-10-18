@@ -24,6 +24,7 @@ import {
   parseMacAddress,
   parseManufactured,
   parseProductId,
+  productIdOf,
   parseModeConfig,
   parseName,
   parseMultipoint,
@@ -258,6 +259,26 @@ test("battery labels follow the component count", () => {
     ]),
     "左 92% 盒 50% 右 88%",
   );
+});
+
+test("产品 ID 能从回包取出并映射到官方型号名", async () => {
+  const { productName } = await import("../web/products.js");
+  const payload = Uint8Array.of(0x40, 0x82, 0x02);
+  assert.equal(productIdOf(payload), 16514);
+  assert.equal(productName(productIdOf(payload)), "Bose QC Ultra 2 HP");
+  assert.equal(productName(0x9999), "");
+});
+
+test("每个 data-label 都有官方中英文案", async () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const html = readFileSync(join(dir, "../web/index.html"), "utf8");
+  const { LABELS } = await import("../web/labels.js");
+  const keys = [...html.matchAll(/data-label="([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(keys.length >= 8, "data-label 数量不对");
+  for (const key of keys) {
+    assert.ok(LABELS[key]?.zh, `缺少中文文案: ${key}`);
+    assert.ok(LABELS[key]?.en, `缺少英文文案: ${key}`);
+  }
 });
 
 test("web files are a complete page", () => {

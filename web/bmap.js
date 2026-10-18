@@ -94,8 +94,6 @@ export const PROMPTS = {
   36: "影院",
 };
 
-export const SIDETONE_LABELS = ["关", "高", "中", "低"];
-export const SPATIAL_LABELS = ["关", "静态", "运动"];
 
 export function encode(fblock, func, operator, payload = new Uint8Array()) {
   const body = payload instanceof Uint8Array ? payload : Uint8Array.from(payload);
@@ -237,6 +235,11 @@ export function parseSerialNumber(payload) {
 export function parseMacAddress(payload) {
   if (payload.length !== 6) return "";
   return [...payload].map((b) => b.toString(16).padStart(2, "0")).join(":").toUpperCase();
+}
+
+export function productIdOf(payload) {
+  if (payload.length < 2) return 0;
+  return ((payload[0] & 0xff) << 8) | (payload[1] & 0xff);
 }
 
 export function parseProductId(payload) {

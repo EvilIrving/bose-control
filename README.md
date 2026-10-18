@@ -1,6 +1,6 @@
 # Bose 本地控制
 
-BMAP 控制页。不登录官方云。电脑 Chrome 走 Web Bluetooth；iPhone / 部分 Android 走 App 壳里的原生蓝牙。
+BMAP 控制页。不登录官方云。电脑 Chrome 走 Web Bluetooth；iPhone / Mac / 部分 Android 走 App 壳里的原生蓝牙。
 
 改 `web/` 之后跑 `scripts/sync-web.sh` 再编 App。
 
@@ -22,6 +22,16 @@ Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Te
 xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 ```
 
+## macOS
+
+`macos/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`。经典蓝牙已连上 Bose 时走 RFCOMM（channel 2，再试 8）；否则先 BLE GATT FEBE，失败再 RFCOMM。
+
+```bash
+xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configuration Release -destination 'platform=macOS'
+```
+
+产物 `macos/build/Build/Products/Release/BoseControl.app`。第一次打开需要蓝牙权限。
+
 ## Android（开源发 Release）
 
 `android/`。WebViewAssetLoader 加载 `assets/www/`。`NativeBLE`：BLE 先扫，没有再试已配对设备的 RFCOMM（`00000000-deca-fade-deca-deafdecacaff`）。
@@ -36,6 +46,7 @@ xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 | --- | --- | --- |
 | Chrome | 有 | 无 |
 | iOS App | 有 | 无（系统不给第三方） |
+| macOS App | 有 | 有 |
 | Android App | 有 | 有 |
 
 ## 兼容性
@@ -56,9 +67,9 @@ xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 
 - 电量按组件数显示：1 个直接百分比，2 个「左/右」，3 个「左/盒/右」。
 - 找设备时按名字前缀（`Bose`、`LE-Bose`、`QC`、`QuietComfort`、`SoundLink`）或 FEBE 服务匹配，改名或匿名的耳机靠服务也能扫到；iOS/Android 原生端同样放 `bose`/`qc`/`quietcomfort`/`soundlink` 关键字。
-- 连上了但 BMAP 一个回包都没有（比如连到别家耳机），会自动断开并提示「这台耳机不支持控制」，不会留一个空白的控制页。
+- 连上了但 BMAP 一个回包都没有（比如连到别家耳机），会自动断开并提示「设备不支持」，不会留一个空白的控制页。
 - 能力探测失败会自动重试一次（超时翻倍），慢设备不会被误判成不支持。
 
-连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`打开耳机，点连接`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`这台耳机不支持控制`、`连接已断开，重连`。每条都在 10 字以内，保证窄屏单行不换行。
+连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`请先连接耳机`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`设备不支持`、`连接已断开，重连`。每条都在 10 字以内，保证窄屏单行不换行。
 
 已验证机型：Bose QuietComfort Ultra Headphones。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。

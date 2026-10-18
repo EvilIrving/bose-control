@@ -2,8 +2,6 @@ import {
   FBLOCK,
   FUNC,
   OP,
-  SIDETONE_LABELS,
-  SPATIAL_LABELS,
   audioSettingsPayload,
   cncPayload,
   eqPayload,
@@ -22,6 +20,7 @@ import {
   parseFlag,
   parseGuid,
   parseProductId,
+  productIdOf,
   parseVoicePrompts,
   voicePromptPayload,
   parseSerialNumber,
@@ -37,6 +36,8 @@ import {
 } from "./bmap.js";
 import { BoseBle } from "./ble.js";
 import { batteryText, linkOf, linkText } from "./link.js";
+import { productName } from "./products.js";
+import { SPATIAL_OPTIONS, STANDBY_OPTIONS, SELF_VOICE_OPTIONS, pick, t } from "./labels.js";
 import { hasNative } from "./native.js";
 
 const ble = new BoseBle();
@@ -68,13 +69,6 @@ const MODE_ZH = {
   Transparent: "通透",
 };
 
-const STANDBY = [
-  { minutes: 5, label: "5′" },
-  { minutes: 20, label: "20′" },
-  { minutes: 60, label: "60′" },
-  { minutes: 0, label: "∞" },
-];
-
 const state = {
   modes: [],
   currentMode: null,
@@ -91,6 +85,7 @@ const state = {
   hasAudioSettings: false,
   info: {
     product: "",
+    productName: "",
     firmware: "",
     serial: "",
     mac: "",
@@ -195,14 +190,21 @@ function shortVersion(version) {
   return version ? String(version).split("+")[0] : "";
 }
 
+function applyLabels() {
+  for (const el of document.querySelectorAll("[data-label]")) {
+    el.textContent = t(el.dataset.label);
+  }
+}
+
 function renderInfo() {
   const rows = [
-    ["型号", state.info.product],
-    ["固件", shortVersion(state.info.firmware), state.info.firmware],
-    ["序列号", state.info.serial],
-    ["MAC", state.info.mac],
-    ["生产", state.info.made],
-    ["硬件", state.info.hardware],
+    [t("productName"), state.info.productName],
+    [t("product"), state.info.product],
+    [t("fw"), shortVersion(state.info.firmware), state.info.firmware],
+    [t("serial"), state.info.serial],
+    [t("mac"), state.info.mac],
+    [t("made"), state.info.made],
+    [t("hardware"), state.info.hardware],
   ].filter((row) => row[1]);
   fillRows(ui.info, rows);
   ui.deviceToggle.hidden = rows.length === 0;
@@ -326,13 +328,23 @@ function renderEq() {
 function renderSpatial() {
   pane(ui.spatial, state.hasAudioSettings);
   if (!state.hasAudioSettings) return;
-  chips(ui.spatial, SPATIAL_LABELS, state.cfg.spatial ?? 0, setSpatial);
+  chips(
+    ui.spatial,
+    SPATIAL_OPTIONS.map((option, index) => ({ key: index, label: pick(option) })),
+    state.cfg.spatial ?? 0,
+    setSpatial,
+  );
 }
 
 function renderSidetone() {
   pane(ui.sidetone, state.sidetone != null);
   if (state.sidetone == null) return;
-  chips(ui.sidetone, SIDETONE_LABELS, state.sidetone, setSidetone);
+  chips(
+    ui.sidetone,
+    SELF_VOICE_OPTIONS.map((option, index) => ({ key: index, label: pick(option) })),
+    state.sidetone,
+    setSidetone,
+  );
 }
 
 function renderVoice() {
@@ -350,12 +362,12 @@ function renderVoice() {
 function renderToggles() {
   ui.toggles.innerHTML = "";
   const items = [
-    { key: "wind", label: "防风噪", on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
-    { key: "mp", label: "双连", on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
-    { key: "talk", label: "对话", on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
-    { key: "touch", label: "禁用触控", on: state.captouch, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
-    { key: "answer", label: "自动接听", on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
-    { key: "play", label: "自动播放", on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
+    { key: "wind", label: t("wind"), on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
+    { key: "mp", label: t("multipoint"), on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
+    { key: "talk", label: t("conversation"), on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
+    { key: "touch", label: t("touch"), on: state.captouch === false, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
+    { key: "answer", label: t("autoAnswer"), on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
+    { key: "play", label: t("autoPlay"), on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
   ];
   let n = 0;
   for (const item of items) {
@@ -376,7 +388,7 @@ function renderStandby() {
   if (state.standby == null) return;
   chips(
     ui.standby,
-    STANDBY.map((x) => ({ key: x.minutes, label: x.label })),
+    STANDBY_OPTIONS.map((option) => ({ key: option.minutes, label: pick(option) })),
     state.standby,
     setStandby,
   );
@@ -389,7 +401,7 @@ function renderAll() {
   ui.controls.hidden = !on;
   ui.go.classList.toggle("busy", state.busy && idle);
   ui.go.disabled = false;
-  ui.goText.textContent = on ? "断开" : "连接";
+  ui.goText.textContent = on ? t("disconnect") : t("connect");
   ui.hint.textContent = idle ? (state.busy ? linkText("busy") : linkText(state.link)) : "";
   if (!on) {
     ui.status.textContent = "";
@@ -413,7 +425,10 @@ async function loadDevice() {
   await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", 1200);
 
   const productReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", 1200);
-  if (productReply) state.info.product = parseProductId(productReply.payload);
+  if (productReply) {
+    state.info.product = parseProductId(productReply.payload);
+    state.info.productName = productName(productIdOf(productReply.payload));
+  }
 
   const firmwareReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", 1200);
   if (firmwareReply) state.info.firmware = parseFirmware(firmwareReply.payload);
@@ -709,6 +724,7 @@ ble.onDisconnected = () => {
   renderAll();
 };
 
+applyLabels();
 window.__boseApp = true;
 if (!navigator.bluetooth && !hasNative()) {
   ui.go.disabled = true;
