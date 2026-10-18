@@ -89,7 +89,6 @@ const ui = {
   voice: $("voice"),
   behaviour: $("behaviour"),
   lang: $("lang"),
-  theme: $("theme"),
   settings: $("settings"),
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
@@ -207,53 +206,6 @@ function renderInfo() {
   pane(ui.info, rows.length > 0);
 }
 
-const THEMES = ["classic", "shadcn"];
-const THEME_KEY = "bose.theme";
-
-function currentTheme() {
-  const fromUrl = new URLSearchParams(location.search).get("theme");
-  if (THEMES.includes(fromUrl)) return fromUrl;
-  try {
-    const saved = localStorage.getItem(THEME_KEY);
-    if (THEMES.includes(saved)) return saved;
-  } catch {
-    /* storage 不可用时用默认 */
-  }
-  return "classic";
-}
-
-function setTheme(id) {
-  if (!THEMES.includes(id)) return;
-  try {
-    localStorage.setItem(THEME_KEY, id);
-  } catch {
-    /* 忽略写入失败 */
-  }
-  document.documentElement.dataset.theme = id;
-}
-
-function applyTheme() {
-  const id = currentTheme();
-  if (id === "classic") document.documentElement.removeAttribute("data-theme");
-  else document.documentElement.dataset.theme = id;
-  return id;
-}
-
-function renderTheme() {
-  chips(
-    ui.theme,
-    [
-      { key: "classic", label: t("themeClassic") },
-      { key: "shadcn", label: t("themeShadcn") },
-    ],
-    currentTheme(),
-    (id) => {
-      setTheme(id);
-      renderTheme();
-    },
-  );
-}
-
 function renderLanguage() {
   chips(ui.lang, LANG_NAMES.map((item) => ({ key: item.id, label: item.native })), getLang(), (id) => {
     setLang(id);
@@ -264,7 +216,6 @@ function renderLanguage() {
 
 function renderSettings() {
   renderLanguage();
-  renderTheme();
   session?.renderSettings?.();
   renderUnverified();
   renderDiag();
@@ -646,7 +597,6 @@ link.onDisconnected = () => {
   renderAll();
 };
 
-applyTheme();
 applyLabels();
 window.__boseApp = true;
 if (!navigator.bluetooth && !hasNative()) {

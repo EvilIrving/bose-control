@@ -71,11 +71,11 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
 
 新增没真机验证的品牌，照这个规则办：能读能写也不默认放出来。
 
-### 6. 两套主题，默认经典
+### 6. 只有一套外观
 
-`web/theme.css`：不加 `data-theme` = 经典（用户认可的那套），`html[data-theme="shadcn"]` = 新版。切换在设置页「外观」，或 `?theme=shadcn`。
+`web/styles.css` 是唯一主题：黑底、胶囊 chip、白底滑轨、无边框顶栏。没有 `data-theme`、没有 `theme.css`、设置页没有「外观」。
 
-不要再「顺手对齐 shadcn」把默认那套改掉。用户明确说过新版不如经典好看。
+不要再加主题切换，也不要「顺手对齐 shadcn」把这套改掉。用户明确说过 shadcn 那版不如这套好看。
 
 ### 7. 布局规则
 
@@ -125,7 +125,7 @@ web/ 页面（无构建、ES module）
  ├─ ui.js         chip / 行 / 面板小工具
  ├─ link.js       错误码 → 提示
  ├─ products.js   型号表           experimental.js  未验证品牌开关
- └─ index.html / styles.css / theme.css
+ └─ index.html / styles.css
 
 原生：macOS (BLE + RFCOMM)、Android (BLE + RFCOMM)、iOS (BLE)、tools/bt-bridge + server.py (浏览器 SPP)
 ```
@@ -166,7 +166,7 @@ web/ 页面（无构建、ES module）
 
 ### 存储键
 
-页面：`bose.lang`、`bose.theme`、`headset.brand`、`headset.unverified`。macOS 的品牌另存 `UserDefaults`（自定义 scheme 下 localStorage 只在本次会话有效），启动时以 `NativeBrand` 注入。
+页面：`bose.lang`、`headset.brand`、`headset.unverified`。macOS 的品牌另存 `UserDefaults`（自定义 scheme 下 localStorage 只在本次会话有效），启动时以 `NativeBrand` 注入。
 
 ### 为什么不上 React / 构建链
 

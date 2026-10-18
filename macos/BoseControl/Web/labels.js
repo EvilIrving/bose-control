@@ -44,9 +44,6 @@ export const LABELS = {
   settings: { zh: "设置", en: "Settings" },
   done: { zh: "完成", en: "Done" },
   language: { zh: "语言", en: "Language" },
-  appearance: { zh: "外观", en: "Appearance" },
-  themeClassic: { zh: "经典", en: "Classic" },
-  themeShadcn: { zh: "新版", en: "Modern" },
 
   device: { zh: "技术信息", en: "Technical Info" },
   modes: { zh: "模式", en: "Modes" },

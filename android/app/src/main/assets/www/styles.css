@@ -1,29 +1,38 @@
-/* 设计令牌照 shadcn/ui 的 dark 主题（neutral）；oklch 值先换成了 hex，
-   因为 Chromium < 111 不认 oklch()，整个颜色会直接失效。 */
+/* 单套外观：黑底、胶囊 chip、白底滑轨、无边框顶栏。
+   颜色值都是 hex，因为 Chromium < 111 不认 oklch()，整个颜色会直接失效。 */
 :root {
   color-scheme: dark;
-  --background: #0a0a0a;
-  --foreground: #fafafa;
-  --card: #171717;
-  --popover: #171717;
-  --primary: #e5e5e5;
-  --primary-foreground: #171717;
+  --bg: #0b0b0b;
+  --fg: #f4f4f4;
+  --dim: #7a7a7a;
+  --line: #2a2a2a;
+  --fill: #171717;
+  --on: #0b0b0b;
+
+  --background: var(--bg);
+  --foreground: var(--fg);
+  --card: var(--fill);
+  --popover: var(--fill);
+  --primary: var(--fg);
+  --primary-foreground: var(--on);
   --secondary: #262626;
-  --muted: #262626;
-  --muted-foreground: #a1a1a1;
+  --muted: var(--fill);
+  --muted-foreground: var(--dim);
   --accent: #404040;
   --accent-foreground: #fafafa;
   --destructive: #ff6467;
-  --border: rgba(255, 255, 255, 0.1);
+  --border: var(--line);
   --input: rgba(255, 255, 255, 0.15);
   --ring: #737373;
-  --hover: rgba(255, 255, 255, 0.06);
-  --radius: 0.625rem;
-  --radius-sm: calc(var(--radius) - 4px);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-lg: var(--radius);
-  --radius-xl: calc(var(--radius) + 4px);
-  --control: 2.75rem;
+  --hover: transparent;
+  /* chip / 滑轨 / 按钮都是胶囊；设备列表卡片不跟着做成胶囊 */
+  --radius: 999px;
+  --radius-sm: 999px;
+  --radius-md: 999px;
+  --radius-lg: 999px;
+  --radius-xl: 1.15rem;
+  /* 按钮/开关整体压矮一点 */
+  --control: 2.5rem;
   --shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
@@ -124,8 +133,9 @@ body {
 .list-head h2 {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: 0.95rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
 }
 
 #hub-refresh,
@@ -285,7 +295,7 @@ h1 {
   transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
 }
 
-/* 下拉面板：shadcn 的 dropdown-menu 视觉，贴着顶栏往下展开 */
+/* 下拉面板：贴着顶栏往下展开 */
 .menu {
   position: absolute;
   z-index: 6;
@@ -297,7 +307,7 @@ h1 {
   overflow-y: auto;
   padding: 0.3rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: 1rem;
   background: var(--popover);
   box-shadow: var(--shadow);
 }
@@ -459,35 +469,36 @@ main > * + * {
 section h2 {
   margin: 0 0 0.55rem;
   color: var(--muted-foreground);
-  font-size: 0.85rem;
-  font-weight: 500;
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
 }
 
 .chip,
 .levels button {
   min-height: var(--control);
-  padding: 0.5rem 0.9rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: transparent;
-  color: var(--foreground);
+  padding: 0.5rem 0.95rem;
+  border: 1px solid var(--line);
+  border-radius: 1.15rem;
+  background: var(--fill);
+  color: var(--fg);
   font-size: 0.95rem;
   font-weight: 500;
   white-space: nowrap;
 }
 
 .chip:hover {
-  background: var(--hover);
+  background: var(--fill);
 }
 
 .chip.on {
-  border-color: transparent;
-  background: var(--primary);
-  color: var(--primary-foreground);
+  border-color: var(--fg);
+  background: var(--fg);
+  color: var(--on);
 }
 
 .chip.on:hover {
-  background: var(--primary);
+  background: var(--fg);
 }
 
 .chip.arm {
@@ -503,6 +514,8 @@ section h2 {
 
 #modes .chip {
   font-size: 0.9rem;
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
 }
 
 #modes.dense {
@@ -513,13 +526,11 @@ section h2 {
   flex: none;
   min-width: 0;
   max-width: 7rem;
-  padding-left: 0.5rem;
-  padding-right: 0.5rem;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-/* 分段控件：shadcn 的 tabs 视觉，轨道是 muted，选中项回到背景色 */
+/* 分段控件：轨道是填充色，选中项反白 */
 .levels {
   flex-wrap: nowrap;
   gap: 0.25rem;
@@ -533,15 +544,13 @@ section h2 {
   flex: 1;
   min-width: 0;
   min-height: calc(var(--control) - 0.5rem);
-  padding: 0 0.25rem;
-  border: 0;
-  background: transparent;
-  color: var(--muted-foreground);
+  padding: 0 0.95rem;
 }
 
 .levels button.on {
-  background: var(--background);
-  color: var(--foreground);
+  border-color: var(--fg);
+  background: var(--fg);
+  color: var(--on);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
@@ -569,16 +578,17 @@ section h2 {
 .track {
   display: flex;
   align-items: center;
-  height: var(--control);
+  height: 2.25rem;
   touch-action: none;
 }
 
 .track .rail {
   position: relative;
   flex: 1;
-  height: 0.375rem;
+  height: 100%;
+  border: 1px solid var(--line);
   border-radius: 999px;
-  background: var(--muted);
+  background: var(--fill);
 }
 
 .track i {
@@ -593,17 +603,7 @@ section h2 {
 }
 
 .track u {
-  position: absolute;
-  top: 50%;
-  left: 0;
-  width: 1rem;
-  height: 1rem;
-  margin-left: -0.5rem;
-  border: 2px solid var(--primary);
-  border-radius: 50%;
-  background: var(--background);
-  transform: translateY(-50%);
-  pointer-events: none;
+  display: none;
 }
 
 .band b {
@@ -878,10 +878,6 @@ input.text:focus {
 }
 
 @media (min-width: 900px) {
-  :root {
-    --control: 2.5rem;
-  }
-
   html {
     height: 100%;
     overflow: hidden;
@@ -916,11 +912,6 @@ input.text:focus {
 
   main > * + * {
     margin-top: 0;
-  }
-
-  .chip {
-    font-size: 0.95rem;
-    padding: 0.5rem 1rem;
   }
 
   #info {
