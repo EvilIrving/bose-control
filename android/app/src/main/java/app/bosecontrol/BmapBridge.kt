@@ -68,13 +68,25 @@ class BmapBridge(
     fun scanInternal() {
         val ad = adapter ?: return fail("adapter")
         close()
+        val mgr = activity.getSystemService(BluetoothManager::class.java)
+        val already = mgr?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
+            .firstOrNull { isBose(it.name ?: "") }
+        if (already != null) {
+            connectGatt(already)
+            return
+        }
+        val bonded = ad.bondedDevices?.firstOrNull { isBose(it.name ?: "") }
         val seen = LinkedHashMap<String, BluetoothDevice>()
+        if (bonded != null) seen[bonded.address] = bonded
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
                 val d = result.device
                 val name = d.name ?: return
                 if (!isBose(name)) return
                 seen[d.address] = d
+                ad.bluetoothLeScanner?.stopScan(this)
+                main.removeCallbacksAndMessages(null)
+                connectGatt(d)
             }
         }
         ad.bluetoothLeScanner?.startScan(cb)
@@ -86,7 +98,7 @@ class BmapBridge(
             } else {
                 connectGatt(device)
             }
-        }, 5000)
+        }, 8000)
     }
 
     private fun connectGatt(device: BluetoothDevice) {
