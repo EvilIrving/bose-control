@@ -266,7 +266,7 @@ class BmapBridge(
                 when (activity.locationEnabledOrNull()) {
                     true -> "on"
                     false -> "off"
-                    null -> "unknown"
+                    else -> "unknown"
                 },
             )
             json.put("perm", perm)
