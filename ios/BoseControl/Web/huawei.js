@@ -293,7 +293,7 @@ export class HuaweiHeadset {
       case: parts[2],
       charging: charging.length >= 3 ? charging.reduce((sum, v) => sum + (v === 1 ? 1 : 0), 0) : 0,
     };
-    // batteryText 认「左 / 盒 / 右」这个顺序
+    // 示意图认「左 / 盒 / 右」这个顺序
     this.state.battery = this.batteryRows(packet);
   }
 
@@ -770,7 +770,7 @@ export class HuaweiHeadset {
 
 export const huaweiBrand = {
   id: "huawei",
-  label: "华为 HUAWEI",
+  label: "HUAWEI",
   // 控制走蓝牙串口，没有 GATT 通道
   transport: "spp",
   channels: [1, 2, 3],

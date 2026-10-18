@@ -44,12 +44,14 @@ import {
 } from "./bmap.js";
 import { HeadsetLink } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, setBridgeAvailable } from "./brands.js";
+import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, setBridgeAvailable, transportFor } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
+import { setUnverified, unverifiedOn } from "./experimental.js";
 import { chip, chips, fillRows, pane } from "./ui.js";
-import { batteryText, linkOf, linkText } from "./link.js";
+import { linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
+import { artIcon, renderArtRow } from "./art.js";
 import {
   LANG_NAMES,
   SPATIAL_OPTIONS,
@@ -92,6 +94,8 @@ const ui = {
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
   diag: $("diag"),
+  art: $("art-row"),
+  unverified: $("unverified"),
   toggles: $("toggles"),
   standby: $("standby"),
   transport: $("transport"),
@@ -117,7 +121,6 @@ const state = {
   peers: [],
   selected: null,
   page: "devices",
-  batteryByAddress: {},
   modesAll: [],
   currentMode: null,
   favorites: null,
@@ -157,8 +160,15 @@ const state = {
   link: "idle",
 };
 
+// 设置页「诊断」里能直接看到的东西：页面里报错往往只进 console.debug，
+// 装成 App 之后那里根本打不开，所以留一份最近几行给面板。
+const LOG_LINES = [];
+
 function log(line) {
   console.debug(line);
+  const stamp = new Date().toTimeString().slice(0, 8);
+  LOG_LINES.push(`${stamp} ${line}`);
+  if (LOG_LINES.length > 20) LOG_LINES.shift();
 }
 
 // 当前这次连接用的是哪个品牌模块；宿主自己不认识任何品牌
@@ -169,6 +179,7 @@ function shortVersion(version) {
 }
 
 function applyLabels() {
+  document.documentElement.lang = getLang() === "zh" ? "zh-CN" : "en";
   for (const el of document.querySelectorAll("[data-label]")) {
     el.textContent = t(el.dataset.label);
   }
@@ -255,7 +266,25 @@ function renderSettings() {
   renderLanguage();
   renderTheme();
   session?.renderSettings?.();
+  renderUnverified();
   renderDiag();
+}
+
+// 未验证的品牌默认不出现在任何地方，这个开关是唯一入口
+function renderUnverified() {
+  chips(
+    ui.unverified,
+    [
+      { key: "off", label: t("stateOff") },
+      { key: "on", label: t("stateOn") },
+    ],
+    unverifiedOn() ? "on" : "off",
+    (id) => {
+      setUnverified(id === "on");
+      renderUnverified();
+      renderAll();
+    },
+  );
 }
 
 function nativeEnv() {
@@ -282,6 +311,7 @@ function renderDiag() {
     rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
   }
   rows.push([t("lastError"), link.lastError || "—"]);
+  for (const line of LOG_LINES.slice(-3)) rows.push([t("recentLog"), line]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
   fillRows(ui.diag, rows);
 }
@@ -308,6 +338,13 @@ function backToDevices() {
   }
 }
 
+// 「连上了」= 通道开着，而且这一台真的回过包（state.link 只有 session.load() 成功才变 ready）。
+// 系统蓝牙链路不算数：App 关了控制通道之后链路还会挂一阵，卡片照它写就会骗人——
+// 显示已连接、点进去其实得重连、重读一遍。
+function sessionLive() {
+  return link.connected && state.link === "ready";
+}
+
 let paintQueued = false;
 
 // 每个回包都会调它，合并到一帧里画一次，省得连点的时候一直重排
@@ -321,7 +358,7 @@ function renderAll() {
 }
 
 function paintAll() {
-  const on = link.connected;
+  const on = sessionLive();
   const page = state.page === "device" ? "device" : "devices";
   setPage(page);
   renderBrand();
@@ -343,10 +380,16 @@ function paintAll() {
     deviceMenu.close(false);
     ui.status.textContent = "";
     ui.meta.textContent = "";
+    renderArtRow(ui.art, { name: "", battery: [] });
     return;
   }
   ui.status.textContent = state.name || link.name || "";
-  ui.meta.textContent = batteryText(state.battery);
+  ui.meta.textContent = brandLabelOf(state.name || link.name);
+  renderArtRow(ui.art, {
+    name: state.name || link.name || "",
+    brand: brandForName(state.name || link.name)?.id ?? getBrand(),
+    battery: state.battery,
+  });
   if (deviceMenu.isOpen()) renderDeviceMenu();
   renderInfo();
   session?.render?.();
@@ -372,8 +415,9 @@ async function loadPeers() {
   onDeviceList(JSON.stringify(await LocalBridge.list()));
 }
 
-function peerBattery(peer) {
-  return state.batteryByAddress[peer.address] ?? "";
+// 列表里只写「已连接 / 未连接」，电量这类细节留在设备页
+function brandLabelOf(name) {
+  return brandById(brandForName(name)?.id ?? getBrand())?.label ?? "";
 }
 
 function renderHub() {
@@ -393,17 +437,18 @@ function renderHub() {
     name.textContent = peer.name || peer.address;
 
     const meta = document.createElement("b");
-    const parts = [peer.connected ? t("connected") : t("notConnected"), peerBattery(peer)].filter(Boolean);
-    meta.textContent = parts.join(" · ");
+    const live = sessionLive() && state.selected === peer.address;
+    // App 自己的会话优先：系统链路还在、会话已经没了的时候，不要报「已连接」
+    meta.textContent = live || peer.connected ? t("connected") : t("notConnected");
 
     const tag = document.createElement("i");
     tag.textContent = brandById(peer.brand)?.label ?? peer.brand;
 
-    if (state.selected === peer.address && link.connected) card.classList.add("active");
+    if (live) card.classList.add("active");
 
-    card.append(name, tag, meta);
+    card.append(artIcon(peer.name, peer.brand), name, tag, meta);
     card.addEventListener("click", () => {
-      if (state.selected === peer.address && link.connected) {
+      if (sessionLive() && state.selected === peer.address) {
         setPage("device");
         return;
       }
@@ -433,7 +478,7 @@ window.onDeviceList = (json) => {
 function renderBrand() {
   const list = brandsHere();
   const hubOn = hubReady() && (state.peers ?? []).length > 0;
-  ui.brand.hidden = hubOn || list.length < 2 || link.connected || state.busy;
+  ui.brand.hidden = hubOn || list.length < 2 || sessionLive() || state.busy;
   if (ui.brand.hidden) return;
   chips(
     ui.brand,
@@ -479,7 +524,7 @@ async function connect(peer = null) {
     await link.connect({
       acceptAll: false,
       address: peer?.address,
-      transport: brand.transport,
+      transport: transportFor(brand),
       channels: brand.channels ?? [],
       services: brand.services ?? [],
     });
@@ -497,9 +542,9 @@ async function connect(peer = null) {
     state.link = linkOf(err);
   }
   state.busy = false;
-  if (link.connected && state.selected) {
-    state.batteryByAddress[state.selected] = batteryText(state.battery);
-  }
+  // 连上或者连失败都刷新一次：卡片状态不能停在连接前的快照上（连着的那台写着「未连接」，
+  // 失败弹回时也一样）
+  refreshPeers();
   renderAll();
 }
 
@@ -529,20 +574,17 @@ function renderDeviceMenu() {
   const items = [];
   for (const peer of state.peers ?? []) {
     const label = peer.name || peer.address;
-    const meta = [
-      brandById(peer.brand)?.label ?? peer.brand,
-      peer.connected ? t("connected") : t("notConnected"),
-      peerBattery(peer),
-    ]
+    const live = sessionLive() && state.selected === peer.address;
+    const meta = [brandById(peer.brand)?.label ?? peer.brand, live || peer.connected ? t("connected") : t("notConnected")]
       .filter(Boolean)
       .join(" · ");
     items.push({
       key: peer.address || label,
       label,
       meta,
-      checked: link.connected && state.selected === peer.address,
+      checked: live,
       run: () => {
-        if (link.connected && state.selected === peer.address) return;
+        if (sessionLive() && state.selected === peer.address) return;
         connect(peer);
       },
     });
@@ -551,15 +593,15 @@ function renderDeviceMenu() {
     items.push({
       key: "current",
       label: state.name || link.name || t("notConnected"),
-      meta: [batteryText(state.battery), link.connected ? t("connected") : ""].filter(Boolean).join(" · "),
-      checked: link.connected,
+      meta: sessionLive() ? t("connected") : "",
+      checked: sessionLive(),
       disabled: true,
     });
   }
   if (hubReady() && (state.peers ?? []).length) {
     items.push({ key: "refresh", label: t("refresh"), separator: true, run: refreshPeers });
   }
-  if (link.connected) {
+  if (sessionLive()) {
     items.push({ key: "disconnect", label: t("disconnect"), danger: true, run: disconnect });
   }
   deviceMenu.setItems(items);
@@ -567,7 +609,7 @@ function renderDeviceMenu() {
 
 ui.go.addEventListener("click", () => {
   if (state.busy) return;
-  if (link.connected) disconnect();
+  if (sessionLive()) disconnect();
   else connect();
 });
 

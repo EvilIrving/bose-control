@@ -63,6 +63,9 @@ export class HeadsetLink {
     };
     window.onNativeError = (msg) => {
       this.lastError = String(msg || "native error");
+      // 这条只会在连接失败时来（原生端连上之后才上报 onNativeConnected），
+      // 不清掉的话界面会一直显示「断开连接」而实际没有会话。
+      this.nativeOn = false;
       this._connectWait?.reject(new Error(this.lastError));
       this._connectWait = null;
     };
@@ -70,6 +73,10 @@ export class HeadsetLink {
 
   async connect({ acceptAll = false, address = null, transport = null, channels = [], services = [] } = {}) {
     this.codec.reset?.();
+    // 上一台的设备和连接状态不能带进这一台：原生端连接的第一件事也是先断开，
+    // 留着旧值会让标题先显示上一台的名字、界面上写着「已连接」。
+    this.device = null;
+    this.nativeOn = false;
     // 浏览器里没有原生桥，串口只能交给本机 server.py 代开
     if (transport === "spp" && !hasNative()) {
       const bridge = new LocalBridge();
@@ -79,10 +86,11 @@ export class HeadsetLink {
         this.rejectAll(new Error("蓝牙已断开"));
         this.onDisconnected?.();
       };
-      await bridge.connect({ address, channels: channels.length ? channels : [1, 2, 3] });
+      await bridge.connect({ address, channels: channels.length ? channels : [1, 2, 3], services });
       this.bridge = bridge;
       this.link = "spp";
-      this.device = { name: "HUAWEI" };
+      // 桥只认地址不认名字，名字交给品牌模块自己退到默认值
+      this.device = { name: "" };
       return;
     }
     if (hasNative()) {
@@ -119,8 +127,9 @@ export class HeadsetLink {
             channels,
             services,
           };
-          // WKWebView 的桥能收对象；Android 的 JS 接口只吃字符串，走另一个方法名
-          if (globalThis.NativeBLE && typeof globalThis.NativeBLE.bleConnect === "function" && !globalThis.webkit) {
+          // 带参数的连接只走 bleConnect：Android 的 JS 接口只吃字符串，统一发 JSON 字符串。
+          // bleScan 是老桥的无参入口，进不了设备和端口，macOS 点设备中心就会连错。
+          if (globalThis.NativeBLE && typeof globalThis.NativeBLE.bleConnect === "function") {
             nativeCall("bleConnect", JSON.stringify(wants));
           } else {
             nativeCall("bleScan", wants);

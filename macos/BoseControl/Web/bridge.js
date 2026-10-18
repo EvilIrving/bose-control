@@ -28,7 +28,7 @@ export class LocalBridge {
     }
   }
 
-  connect({ address, channels = [1, 2, 3], timeout = 12000 }) {
+  connect({ address, channels = [1, 2, 3], services = [], timeout = 12000 }) {
     const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/bt`;
     return new Promise((resolve, reject) => {
       let ws;
@@ -52,7 +52,7 @@ export class LocalBridge {
       this.waiting = settle;
 
       ws.onopen = () => {
-        ws.send(JSON.stringify({ t: "open", address, channels }));
+        ws.send(JSON.stringify({ t: "open", address, channels, services }));
       };
       ws.onmessage = (ev) => {
         let msg;
