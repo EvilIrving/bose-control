@@ -75,6 +75,7 @@ export const LABELS = {
   btOn: { zh: "已开启", en: "On" },
   btOff: { zh: "已关闭", en: "Off" },
   btNone: { zh: "不可用", en: "Unavailable" },
+  btUnknown: { zh: "未知", en: "Unknown" },
   lastError: { zh: "上次错误", en: "Last error" },
   exportDiag: { zh: "导出诊断", en: "Export diagnostics" },
   location: { zh: "定位", en: "Location" },

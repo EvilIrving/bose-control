@@ -88,13 +88,41 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         view.layer?.backgroundColor = NSColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1).cgColor
     }
 
+    private let bootBridgeJS = """
+    (function () {
+      function post(name, payload) {
+        try { window.webkit.messageHandlers[name].postMessage(JSON.stringify(payload)); } catch (e) {}
+      }
+      window.addEventListener('error', function (ev) {
+        var t = ev.target;
+        if (t && (t.src || t.href)) {
+          post('bootError', { kind: 'resource', url: t.src || t.href, tag: t.tagName || '', message: ev.message || 'resource failed' });
+        } else {
+          post('bootError', { kind: 'script', url: ev.filename || '', line: ev.lineno || 0,
+                              message: String(ev.message), stack: (ev.error && ev.error.stack) || '' });
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function (ev) {
+        var r = ev.reason;
+        post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
+      });
+      var tries = 0;
+      var timer = setInterval(function () {
+        if (window.__boseApp === true) { clearInterval(timer); post('appReady', { ok: true }); }
+        else if (++tries > 150) { clearInterval(timer); post('appReady', { ok: false }); }
+      }, 100);
+    })();
+    """
+
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag", "bootError", "appReady"] {
+            // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        uc.addUserScript(WKUserScript(source: bootBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // 自定义 scheme 下 localStorage 只在本次会话里有效，品牌得由原生端记住，
         // 否则下次启动又回到 Bose，自动连接会连错设备。
         let stored = UserDefaults.standard.string(forKey: brandKey) ?? "bose"
@@ -156,17 +184,43 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     private func exportNativeOnly(reason: String) {
-        let text = "# Bose Connector 原生诊断\n\(reason)\n" + Diag.systemInfo() + "\n\n" + Diag.dump()
+        // 页面已经坏了，结果只能由原生自己弹出来
+        exportDiagnostics(pageText: nil, reason: reason) { ok, detail in
+            let alert = NSAlert()
+            alert.messageText = ok ? "诊断已导出" : "诊断导出失败"
+            alert.informativeText = detail
+            alert.addButton(withTitle: "好")
+            alert.runModal()
+        }
+    }
+
+    /// 唯一导出实现：pageText 为 nil 表示页面不可用（原生故障入口）。
+    private func exportDiagnostics(pageText: String?, reason: String, notify: ((Bool, String) -> Void)?) {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
         let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+        let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
+        let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+
+        func finish(_ ok: Bool, _ detail: String) {
+            Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)")
+            if let notify {
+                notify(ok, detail)
+            } else {
+                let payload = reportJSON(ok: ok, path: ok ? url.path : "", bytes: ok ? full.utf8.count : 0,
+                                         error: ok ? nil : detail)
+                js("onDiagExported(\(payload))")
+            }
+        }
+
         do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            Diag.log("原生导出 → \(url.path)")
+            try full.write(to: url, atomically: true, encoding: .utf8)
             NSWorkspace.shared.activateFileViewerSelecting([url])
+            finish(true, url.path)
         } catch {
-            Diag.fail("原生导出失败：\(error.localizedDescription)")
+            let ns = error as NSError
+            finish(false, "\(ns.domain)/\(ns.code): \(ns.localizedDescription)")
         }
     }
 
@@ -211,23 +265,21 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
                 Diag.log("js listDevices → \(payload)")
             }
             js("onDeviceList('\(escape(payload))')")
+        case "bootError":
+            if let text = message.body as? String {
+                Diag.fail("页面启动错误 \(text)")
+            }
+        case "appReady":
+            let ok = (message.body as? String)?.contains("\"ok\":true") ?? false
+            if ok {
+                Diag.log("页面已就绪")
+            } else {
+                Diag.fail("页面脚本 15 秒内没有就绪（模块未执行完）")
+                offerNativeExport(reason: "页面脚本没有就绪，页面日志可能不可用")
+            }
         case "exportDiag":
             guard let text = message.body as? String else { break }
-            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-                ?? FileManager.default.temporaryDirectory
-            let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
-            let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
-            do {
-                try full.write(to: url, atomically: true, encoding: .utf8)
-                Diag.log("导出诊断 → \(url.path)（\(full.utf8.count)B）")
-                js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, error: nil)))")
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            } catch {
-                let detail = "\((error as NSError).domain)/\((error as NSError).code): \(error.localizedDescription)"
-                Diag.log("导出诊断失败：\(detail)")
-                js("onDiagExported(\(reportJSON(ok: false, path: url.path, bytes: 0, error: detail)))")
-            }
+            exportDiagnostics(pageText: text, reason: "", notify: nil)
         case "setBrand":
             if let id = message.body as? String {
                 Diag.log("js setBrand \(id)")

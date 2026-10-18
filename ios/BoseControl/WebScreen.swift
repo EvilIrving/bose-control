@@ -77,13 +77,41 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     private var assets: WebBundleHandler?
     private var session: NativeSession?
 
+    private let bootBridgeJS = """
+    (function () {
+      function post(name, payload) {
+        try { window.webkit.messageHandlers[name].postMessage(JSON.stringify(payload)); } catch (e) {}
+      }
+      window.addEventListener('error', function (ev) {
+        var t = ev.target;
+        if (t && (t.src || t.href)) {
+          post('bootError', { kind: 'resource', url: t.src || t.href, tag: t.tagName || '', message: ev.message || 'resource failed' });
+        } else {
+          post('bootError', { kind: 'script', url: ev.filename || '', line: ev.lineno || 0,
+                              message: String(ev.message), stack: (ev.error && ev.error.stack) || '' });
+        }
+      }, true);
+      window.addEventListener('unhandledrejection', function (ev) {
+        var r = ev.reason;
+        post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
+      });
+      var tries = 0;
+      var timer = setInterval(function () {
+        if (window.__boseApp === true) { clearInterval(timer); post('appReady', { ok: true }); }
+        else if (++tries > 150) { clearInterval(timer); post('appReady', { ok: false }); }
+      }, 100);
+    })();
+    """
+
     override func viewDidLoad() {
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag", "bootError", "appReady"] {
+            // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
+        uc.addUserScript(WKUserScript(source: bootBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let conf = WKWebViewConfiguration()
         conf.userContentController = uc
         conf.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -151,22 +179,53 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     private func exportNativeOnly(reason: String) {
-        let text = "# Bose Connector 原生诊断\n\(reason)\n" + Diag.systemInfo() + "\n\n" + Diag.dump()
+        // 页面已经坏了，结果只能由原生自己弹出来
+        exportDiagnostics(pageText: nil, reason: reason) { [weak self] ok, detail in
+            guard let self else { return }
+            let alert = UIAlertController(
+                title: ok ? "诊断已导出" : "诊断导出失败",
+                message: detail,
+                preferredStyle: .alert
+            )
+            alert.addAction(UIAlertAction(title: "好", style: .default))
+            self.present(alert, animated: true)
+        }
+    }
+
+    /// 唯一导出实现：pageText 为 nil 表示页面不可用（原生故障入口）。
+    private func exportDiagnostics(pageText: String?, reason: String, notify: ((Bool, String) -> Void)?) {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
-        do {
-            try text.write(to: url, atomically: true, encoding: .utf8)
-            Diag.log("原生导出 → \(url.lastPathComponent)")
-            let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-            if let pop = share.popoverPresentationController {
-                pop.sourceView = view
-                pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
-                pop.permittedArrowDirections = []
+        let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
+        let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+
+        func finish(_ ok: Bool, _ detail: String) {
+            Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)")
+            if let notify {
+                notify(ok, detail)
+                return
             }
-            present(share, animated: true)
+            let payload = reportJSON(ok: ok, path: ok ? url.path : "", bytes: ok ? full.utf8.count : 0,
+                                     error: ok ? nil : detail)
+            js("onDiagExported(\(payload))")
+        }
+
+        do {
+            try full.write(to: url, atomically: true, encoding: .utf8)
+            if notify == nil {
+                let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                if let pop = share.popoverPresentationController {
+                    pop.sourceView = view
+                    pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                    pop.permittedArrowDirections = []
+                }
+                present(share, animated: true)
+            }
+            finish(true, url.path)
         } catch {
-            Diag.fail("原生导出失败：\(error.localizedDescription)")
+            let ns = error as NSError
+            finish(false, "\(ns.domain)/\(ns.code): \(ns.localizedDescription)")
         }
     }
 
@@ -205,28 +264,21 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                   let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
                   body["session"] == session?.token, let hex = body["hex"] else { return }
             session?.client.send(hex: hex)
+        case "bootError":
+            if let text = message.body as? String {
+                Diag.fail("页面启动错误 \(text)")
+            }
+        case "appReady":
+            let ok = (message.body as? String)?.contains("\"ok\":true") ?? false
+            if ok {
+                Diag.log("页面已就绪")
+            } else {
+                Diag.fail("页面脚本 15 秒内没有就绪（模块未执行完）")
+                offerNativeExport(reason: "页面脚本没有就绪，页面日志可能不可用")
+            }
         case "exportDiag":
             guard let text = message.body as? String else { return }
-            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-            let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
-            let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
-            do {
-                try full.write(to: url, atomically: true, encoding: .utf8)
-                Diag.log("导出诊断 → \(url.lastPathComponent)（\(full.utf8.count)B）")
-                js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, error: nil)))")
-                let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-                if let pop = share.popoverPresentationController {
-                    pop.sourceView = view
-                    pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
-                    pop.permittedArrowDirections = []
-                }
-                present(share, animated: true)
-            } catch {
-                let detail = "\((error as NSError).domain)/\((error as NSError).code): \(error.localizedDescription)"
-                Diag.log("导出诊断失败：\(detail)")
-                js("onDiagExported(\(reportJSON(ok: false, path: url.path, bytes: 0, error: detail)))")
-            }
+            exportDiagnostics(pageText: text, reason: "", notify: nil)
         case "bleDisconnect":
             guard let token = message.body as? String, token == session?.token else { return }
             session?.client.disconnect()

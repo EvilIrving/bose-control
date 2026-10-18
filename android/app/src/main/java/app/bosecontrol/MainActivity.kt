@@ -5,6 +5,7 @@ import android.content.pm.ApplicationInfo
 import android.content.pm.PackageManager
 import android.graphics.Color
 import android.location.LocationManager
+import androidx.core.location.LocationManagerCompat
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
@@ -51,7 +52,8 @@ class MainActivity : ComponentActivity() {
 
     fun locationEnabled(): Boolean {
         val lm = getSystemService(LocationManager::class.java) ?: return false
-        return lm.isLocationEnabled
+        // isLocationEnabled() 是 API 28 才有的，minSdk 26 只能走 AndroidX 的兼容实现
+        return runCatching { LocationManagerCompat.isLocationEnabled(lm) }.getOrDefault(false)
     }
 
     private val ask = registerForActivityResult(
@@ -176,7 +178,7 @@ class MainActivity : ComponentActivity() {
             banner.visibility = View.VISIBLE
             // 页面自己起不来时，设置页的导出按钮也不存在，留一个原生入口
             banner.setOnClickListener {
-                bridge.exportDiag("页面未启动，页面日志不可用：\n$text")
+                bridge.writeDiagnostics("页面未启动，页面日志不可用：\n$text", "native")
             }
         }
     }

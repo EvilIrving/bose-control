@@ -80,12 +80,14 @@ function transportsOf(brand) {
 export function missingCapabilities() {
   const caps = platformInfo();
   const transports = Array.isArray(caps.transports) ? caps.transports : [];
-  const hasBleBridge = typeof globalThis.webkit?.messageHandlers?.bleScan !== "undefined";
-  const hasBle = transports.includes("ble") || (!transports.length && (hasBleBridge || Boolean(globalThis.navigator?.bluetooth)));
-  const hasSpp = transports.includes("spp") || caps.hub === true;
+  const isIOS = typeof globalThis.webkit?.messageHandlers?.bleScan !== "undefined";
+  const hasBle = transports.includes("ble") || isIOS || Boolean(globalThis.navigator?.bluetooth);
+  // 浏览器 + 本机 server.py 的串口桥也能走 SPP；hub 说的是设备中心，不是 SPP
+  const hasSpp = transports.includes("spp") || bridgeUp;
   const hasHub = caps.hub === true || bridgeUp;
   const list = [];
-  if (!hasSpp) list.push("SPP（系统不开放给第三方）");
+  // 只有 iOS 是系统层面不给第三方 SPP，原因写出来；别的平台没这条通道就直说
+  if (!hasSpp) list.push(isIOS ? "SPP（iOS 不开放给第三方）" : "SPP");
   if (!hasBle) list.push("BLE");
   if (!hasHub) list.push("设备中心（枚举不到系统配对设备）");
   return list;

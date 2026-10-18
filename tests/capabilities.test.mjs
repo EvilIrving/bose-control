@@ -40,13 +40,23 @@ test("iOS 只有 bleScan 桥：不能说 BLE 不支持", () => {
     globalThis.webkit = { messageHandlers: { bleScan: {}, bleConnect: {}, sendData: {}, bleDisconnect: {} } };
   }, missingCapabilities);
   assert.ok(!list.some((item) => item.startsWith("BLE")), `不该出现 BLE：${list.join(" / ")}`);
-  assert.ok(list.some((item) => item.includes("SPP")), "SPP 确实不可用");
+  assert.ok(list.some((item) => item === "SPP（iOS 不开放给第三方）"), `SPP 原因要写清：${list.join(" / ")}`);
   assert.ok(list.some((item) => item.includes("设备中心")), "iOS 没有设备中心");
+});
+
+test("浏览器 + 本机串口桥：SPP 与设备中心都算可用", async () => {
+  const brands = await import("../web/brands.js");
+  const list = withGlobals(() => {
+    globalThis.navigator = { bluetooth: {} };
+    brands.setBridgeAvailable(true);
+  }, missingCapabilities);
+  brands.setBridgeAvailable(false);
+  assert.deepEqual(list, []);
 });
 
 test("纯浏览器：BLE / SPP / 设备中心都算缺口", () => {
   const list = withGlobals(() => {}, missingCapabilities);
-  assert.deepEqual(list, ["SPP（系统不开放给第三方）", "BLE", "设备中心（枚举不到系统配对设备）"]);
+  assert.deepEqual(list, ["SPP", "BLE", "设备中心（枚举不到系统配对设备）"]);
 });
 
 test("服务/写入的原生错误码映射不能变", () => {

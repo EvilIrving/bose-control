@@ -68,6 +68,7 @@ import {
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
 import { logCount, logLine, logText } from "./log.js";
+import { btStateKey, exportResultText, locationKey } from "./diag.js";
 import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
@@ -166,6 +167,21 @@ let state = {
 function log(line, scope = "app") {
   logLine(scope, line);
 }
+
+// 原生导出的回执：成功/失败都要有反馈，设置页重绘之后结果还在
+let diagExport = null;
+window.onDiagExported = (info) => {
+  diagExport = exportResultText(info);
+  logLine(diagExport.ok ? "app" : "err", diagExport.text);
+  let note = document.getElementById("diag-export-state");
+  if (!note && ui.diagActions) {
+    note = document.createElement("span");
+    note.id = "diag-export-state";
+    note.className = "diag-note";
+    ui.diagActions.appendChild(note);
+  }
+  if (note) note.textContent = diagExport.text;
+};
 
 // 页面上任何地方崩了都要留下痕迹，不然只有一行"点不动"可看
 window.addEventListener("error", (ev) => {
@@ -290,15 +306,14 @@ function nativeEnv() {
 function renderDiag() {
   const chrome = (String(navigator.userAgent).match(/Chrome\/(\d+)/) || [])[1] || "?";
   const env = nativeEnv();
-  const bt = !env ? "—" : env.adapter === 1 ? t("btOn") : env.adapter === 2 ? t("btOff") : t("btNone");
+  const btKey = btStateKey(env);
+  const bt = btKey ? t(btKey) : "—";
   const rows = [
     ["WebView", `Chromium ${chrome}`],
     [t("bridge"), hasNative() ? "OK" : "—"],
     [t("btState"), bt],
   ];
-  if (env && typeof env.loc !== "undefined") {
-    rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
-  }
+  if (env) rows.push([t("location"), t(locationKey(env))]);
   rows.push([t("lastError"), link.lastError || "—"]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
   fillRows(ui.diag, rows);
@@ -306,10 +321,14 @@ function renderDiag() {
   if (canExportDiag()) {
     const btn = chip(t("exportDiag"), false);
     btn.addEventListener("click", exportDiag);
-    const state = document.createElement("span");
-    state.id = "diag-export-state";
-    state.className = "diag-note";
-    ui.diagActions.append(btn, state);
+    ui.diagActions.appendChild(btn);
+    if (diagExport) {
+      const note = document.createElement("span");
+      note.id = "diag-export-state";
+      note.className = "diag-note";
+      note.textContent = diagExport.text;
+      ui.diagActions.appendChild(note);
+    }
   }
 }
 

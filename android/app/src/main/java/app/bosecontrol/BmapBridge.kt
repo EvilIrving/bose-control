@@ -271,43 +271,78 @@ class BmapBridge(
 
     @JavascriptInterface
     fun exportDiag(text: String) {
+        writeDiagnostics(text, "page")
+    }
+
+    /**
+     * 唯一的导出实现：页面按钮和错误横幅都走这里。
+     * 写入与分享分开——分享失败不影响已经生成的文件，也不会把文件删掉。
+     */
+    fun writeDiagnostics(text: String, origin: String) {
         main.post {
-            var target: File? = null
-            try {
+            var file: File? = null
+            val reason = runCatching {
                 val name = "bose-diag-" +
                     SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date()) + ".txt"
                 val full = text + "\n\n==== 原生 ====\n" + env() + "\n\n" + Diag.dump() + "\n"
                 val root = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
                 val dir = File(root, "diagnostics").apply { mkdirs() }
-                val file = File(dir, name)
-                target = file
-                file.writeBytes(full.toByteArray())
-                Diag.add("diag", "导出 → ${file.absolutePath}（${file.length()}B）")
-                val uri = FileProvider.getUriForFile(activity, activity.packageName + ".diag", file)
+                val target = File(dir, name)
+                target.writeBytes(full.toByteArray())
+                if (!target.exists() || target.length() == 0L) {
+                    runCatching { target.delete() }
+                    error("写入后文件为空")
+                }
+                file = target
+                Diag.add("diag", "导出 → ${target.absolutePath}（${target.length()}B）")
+                null
+            }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+
+            if (reason != null) {
+                Diag.add("diag", "导出失败（$origin）：$reason")
+                runCatching { file?.takeIf { it.exists() }?.delete() }
+                notifyExport(origin, ok = false, file = null, error = reason)
+                return@post
+            }
+
+            val target = file!!
+            val shareError = runCatching {
+                val uri = FileProvider.getUriForFile(activity, activity.packageName + ".diag", target)
                 val send = Intent(Intent.ACTION_SEND).apply {
                     type = "text/plain"
                     putExtra(Intent.EXTRA_STREAM, uri)
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 activity.startActivity(Intent.createChooser(send, "导出诊断"))
-                report(file, null)
-            } catch (e: Exception) {
-                Diag.add("diag", "导出失败：${e.javaClass.simpleName}: ${e.message}")
-                // 写了一半的文件不留
-                runCatching { target?.takeIf { it.exists() }?.delete() }
-                report(null, "${e.javaClass.simpleName}: ${e.message}")
+                null
+            }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
+
+            if (shareError != null) {
+                // 文件已经写好，保留；只报告分享失败
+                Diag.add("diag", "分享失败（$origin）：$shareError；文件保留 ${target.absolutePath}")
             }
+            notifyExport(origin, ok = true, file = target, error = shareError)
         }
     }
 
-    /** 导出结果回传页面，按钮必须有反馈，不能点了没动静。 */
-    private fun report(file: File?, error: String?) {
+    /** 页面还活着就回调页面；页面挂了（错误横幅入口）就用 Toast 给用户看。 */
+    private fun notifyExport(origin: String, ok: Boolean, file: File?, error: String?) {
         val payload = org.json.JSONObject()
-            .put("ok", error == null)
+            .put("ok", ok)
             .put("path", file?.absolutePath ?: "")
             .put("bytes", file?.length() ?: 0)
             .put("error", error ?: "")
-        web.evaluateJavascript("onDiagExported(${payload})", null)
+        if (origin == "page") {
+            web.evaluateJavascript("onDiagExported(${payload})", null)
+        } else {
+            val text = when {
+                !ok -> "导出失败：${error ?: "未知原因"}"
+                error != null -> "已导出（分享未完成）：${file?.absolutePath}"
+                else -> "已导出：${file?.absolutePath}"
+            }
+            android.widget.Toast.makeText(activity, text, android.widget.Toast.LENGTH_LONG).show()
+            Diag.add("diag", "原生入口反馈：$text")
+        }
     }
 
     fun scanInternal() {
