@@ -260,6 +260,10 @@ function renderDiag() {
   if (env && typeof env.loc !== "undefined") {
     rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
   }
+  if (peerDiag.total) {
+    rows.push([t("diagPairMatch"), `${peerDiag.matched} / ${peerDiag.total}`]);
+    if (peerDiag.dropped.length) rows.push([t("diagUnmatched"), peerDiag.dropped.join("、")]);
+  }
   rows.push([t("lastError"), link.lastError || "—"]);
   for (const line of LOG_LINES.slice(-3)) rows.push([t("recentLog"), line]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
@@ -449,6 +453,8 @@ function renderHub() {
 let peersSig = null;
 
 let droppedSig = "";
+// 原生给到的配对表识别结果，固定留在诊断里：日志区会被耳机读取淹没，丢了就查不到
+let peerDiag = { total: 0, matched: 0, dropped: [] };
 
 window.onDeviceList = (json) => {
   peerPending = false;
@@ -461,6 +467,9 @@ window.onDeviceList = (json) => {
   // 原生端只负责把配对设备全给出来，认品牌是这边的事；认不出的（键盘、鼠标、手机）直接丢掉，
   // 但要在诊断里留一行：少一台时得能分清是原生没给、还是给了但没认上
   const dropped = rows.filter((peer) => !brandForName(peer.name)).map((peer) => peer.name || peer.address);
+  peerDiag = { total: rows.length, matched: rows.length - dropped.length, dropped };
+  // 设置页开着的时候列表还在轮询，识别结果要跟着更新
+  if (ui.settings.classList.contains("open")) renderDiag();
   const droppedNow = dropped.join("\u0000");
   if (droppedNow !== droppedSig) {
     droppedSig = droppedNow;
