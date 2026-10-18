@@ -15,7 +15,7 @@ Bose Connector：不登录、不联网，用蓝牙直连耳机的一个页面 + 
 
 已验证真机：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号靠「谁回包就显示谁」自动适配。
 
-`npm test` 现在 100 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
+`npm test` 现在 109 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
 
 ## 我对 agent 的要求
 
@@ -91,7 +91,7 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
 
 ### 8. 「连上了」的判定
 
-`link.connected` 只说明通道开着。会话还活着要同时满足「通道开着 + 这次连接真的读到过回包」（`web/app.js` 的 `sessionLive()` / `state.link === "ready"`）。
+`link.connected` 只说明通道开着。会话还活着要同时满足「通道开着 + 这次连接真的读到过有效数据」（`web/app.js` 的 `sessionLive()` / `state.link === "ready"`）。可用控制通过品牌 `ready()` 提前确认，不把任意通知或错误包当成 ready。
 
 系统蓝牙链路在 App 关掉控制通道后还会挂一阵，拿它写「已连接」会骗人：卡片显示已连接，点进去要重连。改动这块要同时看设备中心卡片、顶栏下拉、点卡片的行为三处。
 
@@ -138,7 +138,7 @@ web/ 页面（无构建、ES module）
 ```
 
 - `codec()` 返回 `{ id, ble, filters, services, chars, reset(), chunks(bytes, link), parse(chunk, link), key(packet), header(bytes) }`。
-- `create()` 返回的 session 宿主只认四个入口：`load()` / `render()` / `renderSettings()` / `onPacket(packet)`。`load()` 必须返回「有没有读到东西」，宿主用它判定设备支不支持。
+- `create()` 返回 `load()` / `render()` / `renderSettings()` / `onPacket(packet)`，可选 `ready()` 表示已有可用控制。宿主在 `refresh()` 时检查 ready，不必等 load 全部结束；load 仍返回「有没有读到东西」。每次连接独立 state，品牌拿到绑定该连接的 `link.scope()`，旧任务不得复用新连接。
 - `alt` 是备用通道，只在主通道这台机器上没有时才算可用（vivo 的 GATT 只在浏览器里能走）。
 
 ### 传输层
@@ -158,7 +158,7 @@ web/ 页面（无构建、ES module）
 | Android | `addJavascriptInterface(bridge, "NativeBLE")` | 同上；JS 接口只吃字符串，所以 `bleConnect(JSON.stringify(...))`；`platform()` 返回 `{transports:["ble","spp"],hub:true}` |
 | iOS | `window.webkit.messageHandlers`（没有 `NativeBLE` 对象） | 只有 `bleScan` / `bleConnect` / `sendData` / `bleDisconnect`；没有 `platform()` / `hub` / `listDevices` / `setBrand`，所以页面按「单品牌 + 一个连接按钮」走 |
 
-原生回调页面：`onDataReceived(hex)`、`onNativeConnected(json)`、`onNativeDisconnected()`、`onNativeError(msg)`、`onDeviceList(json)`。都是全局函数。
+原生回调页面：`onDataReceived(hex, session)`、`onNativeConnected(info, session)`、`onNativeDisconnected(session)`、`onNativeError(msg, session)`、`onDeviceList(json)`。全局函数只注册一套，路由给当前 owner，并校验 session。`bleConnect` JSON 带 session，`sendData` 接收 `{session, hex}` JSON 字符串，`bleDisconnect` 接收 session 字符串。三端壳与页面必须一起更新，不兼容旧回调签名。
 
 新增原生能力时三端一起看：`web/brands.js` 的 `platformInfo()` 只有拿到 `transports` 才会显示对应品牌。
 
@@ -194,7 +194,7 @@ web/ 页面（无构建、ES module）
 ### macOS
 
 - 设备中心来自 `IOBluetoothDevice.pairedDevices()`，排序和去重都在 `HeadsetCatalog`（已连接优先 + 本地化自然序）。
-- Bose：先看经典蓝牙是否已连（RFCOMM channel 2 → 8 → SDP），没连先 BLE FEBE，失败再 RFCOMM。
+- Bose：明确点选已配对设备时先试 RFCOMM，失败再试目标 BLE；没有目标时先 BLE。BLE 名称匹配允许 LE- 前缀差异，不能回退任意其它 Bose。串口只尝试控制服务和明确候选端口，不遍历全部 SDP 端口。
 - 华为 / vivo / OPPO：端口按 `services` 的 UUID 从 SDP 取，取不到再试 `channels`。不要碰免提 / A2DP 的 RFCOMM 口，写进去会打断通话。
 - 页面统一用 `bleConnect(JSON)`；无参 `bleScan` 是旧桥入口，macOS 点设备中心会连错设备。
 
@@ -240,7 +240,7 @@ web/ 页面（无构建、ES module）
 改页面：
 
 ```bash
-npm test                      # 100 条，含真机帧与传输层
+npm test                      # 109 条，含真机帧与传输层
 sh scripts/sync-web.sh        # 然后 git status 必须只剩预期改动
 ```
 

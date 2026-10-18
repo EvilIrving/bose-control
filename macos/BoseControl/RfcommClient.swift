@@ -30,9 +30,8 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         }
     }
 
-    var hasPairedDevice: Bool {
-        !paired().isEmpty
-    }
+    var hasPairedDevice: Bool { preferredDevice() != nil }
+    var targetName: String? { preferredDevice()?.name }
 
     func connect() {
         disconnect()
@@ -113,7 +112,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
 
     func rfcommChannelOpenComplete(_ rfcommChannel: IOBluetoothRFCOMMChannel!, status error: IOReturn) {
         DispatchQueue.main.async { [weak self] in
-            guard let self, self.opening else { return }
+            guard let self, self.opening, rfcommChannel === self.channel else { return }
             if error == kIOReturnSuccess {
                 self.channel = rfcommChannel
                 self.reported = true
@@ -132,7 +131,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
 
     func rfcommChannelClosed(_ rfcommChannel: IOBluetoothRFCOMMChannel!) {
         DispatchQueue.main.async { [weak self] in
-            guard let self else { return }
+            guard let self, rfcommChannel === self.channel else { return }
             let was = self.reported
             self.channel = nil
             self.reported = false
@@ -147,7 +146,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         data dataPointer: UnsafeMutableRawPointer!,
         length dataLength: Int
     ) {
-        guard dataLength > 0, let dataPointer else { return }
+        guard rfcommChannel === channel, dataLength > 0, let dataPointer else { return }
         let hex = HexBytes.hex(Data(bytes: dataPointer, count: dataLength))
         Diag.debug("rfcomm rx \(dataLength)B \(hex)")
         DispatchQueue.main.async { [weak self] in
@@ -281,14 +280,6 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             if let rec = device.getServiceRecord(for: uuid) {
                 var channelID: BluetoothRFCOMMChannelID = 0
                 if rec.getRFCOMMChannelID(&channelID) == kIOReturnSuccess, channelID > 0 {
-                    ids.append(channelID)
-                }
-            }
-        }
-        if let services = device.services as? [IOBluetoothSDPServiceRecord] {
-            for rec in services {
-                var channelID: BluetoothRFCOMMChannelID = 0
-                if rec.getRFCOMMChannelID(&channelID) == kIOReturnSuccess, channelID > 0, !ids.contains(channelID) {
                     ids.append(channelID)
                 }
             }

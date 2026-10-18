@@ -35,7 +35,9 @@ class BmapBridge(
     private var spp: BluetoothSocket? = null
     private var sppThread: Thread? = null
     private var link = "ble"
-    private var gen = 0
+    @Volatile private var gen = 0
+    private var session = ""
+    @Volatile private var openingSocket: BluetoothSocket? = null
     private var scanCallback: ScanCallback? = null
     private var scanTimeout: Runnable? = null
 
@@ -43,6 +45,9 @@ class BmapBridge(
     private var wantAddress: String? = null
     private var wantChannels = listOf(1, 2, 3)
     private var wantServices = listOf<String>()
+    private var sppTried = false
+    private val gattWrites = java.util.ArrayDeque<ByteArray>()
+    private var writingGatt = false
 
     @JavascriptInterface
     fun bleScan() {
@@ -54,23 +59,21 @@ class BmapBridge(
     /** 页面按品牌选好路线：ble 走 GATT 扫描，spp 走指定设备的蓝牙串口。 */
     @JavascriptInterface
     fun bleConnect(payload: String) {
-        val json = runCatching { org.json.JSONObject(payload.ifBlank { "{}" }) }.getOrNull()
-        wantTransport = json?.optString("transport", "ble") ?: "ble"
-        wantAddress = json?.optString("address", "")?.takeIf { it.isNotEmpty() }
-        val channels = json?.optJSONArray("channels")
-        if (channels != null) {
-            val list = mutableListOf<Int>()
-            for (i in 0 until channels.length()) list.add(channels.optInt(i, 0))
-            if (list.isNotEmpty()) wantChannels = list
+        val json = runCatching { org.json.JSONObject(payload) }.getOrNull() ?: return
+        val token = json.optString("session")
+        main.post {
+            close()
+            session = token
+            wantTransport = json.optString("transport", "ble")
+            wantAddress = json.optString("address").takeIf { it.isNotEmpty() }
+            val channels = json.optJSONArray("channels")
+            wantChannels = if (channels == null) emptyList() else
+                (0 until channels.length()).map { channels.optInt(it) }.filter { it > 0 }
+            val services = json.optJSONArray("services")
+            wantServices = if (services == null) emptyList() else
+                (0 until services.length()).map { services.optString(it) }.filter { it.isNotEmpty() }
+            activity.requestBtPermission { if (session == token) scanInternal() }
         }
-        // 品牌私有控制服务的 UUID（vivo 0x0837、OPPO 0x079A）：有这个就先按 UUID 走 SDP，别再猜端口号
-        val services = json?.optJSONArray("services")
-        if (services != null) {
-            val list = mutableListOf<String>()
-            for (i in 0 until services.length()) services.optString(i, "").takeIf { it.isNotEmpty() }?.let { list.add(it) }
-            wantServices = list
-        }
-        main.post { activity.requestBtThenScan() }
     }
 
     /** 已配对设备列表，页面自己做品牌归类。 */
@@ -162,14 +165,21 @@ class BmapBridge(
     private fun escapeJson(text: String) = text.replace("\\", "\\\\").replace("\"", "\\\"")
 
     @JavascriptInterface
-    fun sendData(hex: String) {
-        val bytes = hexToBytes(hex)
-        main.post { write(bytes) }
+    fun sendData(payload: String) {
+        val body = runCatching { org.json.JSONObject(payload) }.getOrNull() ?: return
+        val token = body.optString("session")
+        val bytes = hexToBytes(body.optString("hex"))
+        main.post { if (token == session) write(bytes) }
     }
 
     @JavascriptInterface
-    fun bleDisconnect() {
-        main.post { close() }
+    fun bleDisconnect(token: String) {
+        main.post {
+            if (token == session) {
+                close()
+                session = ""
+            }
+        }
     }
 
     /** 页面问平台能力：能走哪几条路、有没有设备中心。 */
@@ -197,6 +207,7 @@ class BmapBridge(
         if (!ad.isEnabled) return fail("off")
         close()
         val mine = ++gen
+        sppTried = false
         if (wantTransport == "spp") {
             val target = wantAddress
             if (target.isNullOrEmpty()) return fail("none")
@@ -205,13 +216,18 @@ class BmapBridge(
         val mgr = activity.getSystemService(BluetoothManager::class.java)
         // 已经连在系统上的耳机不会广播，先直接拿现成的 GATT 连接
         val already = mgr?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
-            .firstOrNull { isBose(it.name ?: "") }
+            .firstOrNull { if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "") }
         if (already != null) {
             log("gatt already connected: ${already.name}")
             connectGatt(already, mine)
             return
         }
 
+        if (wantAddress != null) {
+            log("known target, open control channel directly")
+            trySpp(ad, mine)
+            return
+        }
         val scanner = ad.bluetoothLeScanner ?: return fail("off")
         val seen = LinkedHashMap<String, BluetoothDevice>()
         var settled = false
@@ -227,10 +243,11 @@ class BmapBridge(
 
         val cb = object : ScanCallback() {
             override fun onScanResult(callbackType: Int, result: ScanResult) {
-                if (settled) return
+                if (settled || mine != gen) return
                 val device = result.device
                 val name = result.scanRecord?.deviceName ?: device.name ?: return
-                if (!isBose(name)) return
+                if (wantAddress != null && !device.address.equals(wantAddress, ignoreCase = true)) return
+                if (wantAddress == null && !isBose(name)) return
                 log("found $name")
                 seen[device.address] = device
                 settle()
@@ -238,6 +255,7 @@ class BmapBridge(
             }
 
             override fun onScanFailed(errorCode: Int) {
+                if (mine != gen) return
                 log("scan failed $errorCode")
                 settle()
                 fail(if (!activity.locationEnabled()) "location" else "scan")
@@ -251,6 +269,7 @@ class BmapBridge(
         }
 
         val timeout = Runnable {
+            if (mine != gen) return@Runnable
             settle()
             val bonded = ad.bondedDevices?.firstOrNull { isBose(it.name ?: "") }
             when {
@@ -271,19 +290,19 @@ class BmapBridge(
         var discovered = false
         var ready = false
         main.postDelayed({
-            if (mine == gen && !ready) {
+            if (mine == gen && !ready && gatt != null) {
                 log("connect timeout")
                 fallback(mine)
             }
         }, 15000)
         fun discover(g: BluetoothGatt) {
-            if (discovered || mine != gen) return
+            if (discovered || mine != gen || g !== gatt) return
             discovered = true
             g.discoverServices()
         }
         val cb = object : BluetoothGattCallback() {
             override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
-                if (mine != gen) {
+                if (mine != gen || g !== gatt) {
                     runCatching { g.close() }
                     return
                 }
@@ -295,7 +314,7 @@ class BmapBridge(
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
                     log("gatt disconnected status=$status")
                     if (status == BluetoothGatt.GATT_SUCCESS) {
-                        js("onNativeDisconnected()")
+                        event("onNativeDisconnected", mine)
                     } else {
                         fallback(mine)
                     }
@@ -303,14 +322,14 @@ class BmapBridge(
             }
 
             override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
-                if (mine != gen) return
+                if (mine != gen || g !== gatt) return
                 log("mtu=$mtu status=$status")
                 discover(g)
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-                if (mine != gen) return
-                if (status != BluetoothGatt.GATT_SUCCESS) return fail("service")
+                if (mine != gen || g !== gatt) return
+                if (status != BluetoothGatt.GATT_SUCCESS) return fail("service", mine)
                 val svc = g.getService(SVC_APK) ?: g.getService(SVC_SIG) ?: return fail("service")
                 val ch = svc.getCharacteristic(CHAR_SECURE)
                     ?: svc.getCharacteristic(CHAR_PLAIN)
@@ -336,17 +355,17 @@ class BmapBridge(
             }
 
             override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
-                if (mine != gen) return
+                if (mine != gen || g !== gatt) return
                 if (descriptor.uuid != CCCD) return
                 log("cccd write status=$status")
                 if (status != BluetoothGatt.GATT_SUCCESS) return fail("notify")
                 ready = true
-                connected(device.name ?: "Bose", "ble")
+                connected(device.name ?: "Bose", "ble", mine)
             }
 
             override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic, value: ByteArray) {
                 if (mine != gen) return
-                js("onDataReceived('${bytesToHex(value)}')")
+                if (g === gatt) event("onDataReceived", mine, bytesToHex(value))
             }
 
             @Deprecated("Deprecated in Java")
@@ -354,16 +373,23 @@ class BmapBridge(
             override fun onCharacteristicChanged(g: BluetoothGatt, ch: BluetoothGattCharacteristic) {
                 if (mine != gen) return
                 val value = ch.value ?: return
-                js("onDataReceived('${bytesToHex(value)}')")
+                if (g === gatt) event("onDataReceived", mine, bytesToHex(value))
             }
 
             override fun onCharacteristicWrite(g: BluetoothGatt, ch: BluetoothGattCharacteristic, status: Int) {
-                if (mine != gen) return
-                if (status != BluetoothGatt.GATT_SUCCESS) log("write failed status=$status")
+                main.post {
+                    if (mine != gen || g !== gatt) return@post
+                    writingGatt = false
+                    if (status != BluetoothGatt.GATT_SUCCESS) {
+                        log("write failed status=$status")
+                        gattWrites.clear()
+                        fail("write", mine)
+                    } else flushGatt()
+                }
             }
         }
         gatt = runCatching {
-            device.connectGatt(activity, false, cb, BluetoothDevice.TRANSPORT_LE)
+            device.connectGatt(activity, false, cb, BluetoothDevice.TRANSPORT_LE, BluetoothDevice.PHY_LE_1M_MASK, main)
         }.onFailure { log("connectGatt threw ${it.message}") }.getOrNull()
         if (gatt == null) fail("connect")
     }
@@ -373,19 +399,29 @@ class BmapBridge(
 
     private fun write(bytes: ByteArray) {
         val socket = spp
+        val mine = gen
         if (socket?.isConnected == true) {
             sppWriter.execute {
                 try {
+                    if (mine != gen) return@execute
                     socket.outputStream.write(bytes)
                     socket.outputStream.flush()
                 } catch (_: Exception) {
-                    fail("write")
+                    fail("write", mine)
                 }
             }
             return
         }
+        gattWrites.addLast(bytes)
+        flushGatt()
+    }
+
+    private fun flushGatt() {
+        if (writingGatt || gattWrites.isEmpty()) return
         val ch = writeChar ?: return fail("write")
         val g = gatt ?: return fail("write")
+        val bytes = gattWrites.removeFirst()
+        writingGatt = true
         val type = if ((ch.properties and BluetoothGattCharacteristic.PROPERTY_WRITE_NO_RESPONSE) != 0) {
             BluetoothGattCharacteristic.WRITE_TYPE_NO_RESPONSE
         } else {
@@ -401,17 +437,24 @@ class BmapBridge(
             @Suppress("DEPRECATION")
             g.writeCharacteristic(ch)
         }
-        if (!ok) fail("write")
+        if (!ok) {
+            writingGatt = false
+            gattWrites.clear()
+            fail("write")
+        }
     }
 
     // GATT 连不上时（典型是耳机正连着手机，BLE 通道被占），退到已配对设备的 RFCOMM
     private fun fallback(mine: Int) {
         if (mine != gen) return
-        runCatching { gatt?.close() }
+        val previous = gatt
         gatt = null
         writeChar = null
+        runCatching { previous?.close() }
         val ad = adapter
-        if (ad != null && ad.bondedDevices?.any { isBose(it.name ?: "") } == true) {
+        if (!sppTried && ad != null && ad.bondedDevices?.any {
+            if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "")
+        } == true) {
             log("gatt unusable, fall back to rfcomm")
             trySpp(ad, mine)
         } else {
@@ -422,13 +465,15 @@ class BmapBridge(
     /** 页面指定了设备和端口，按顺序试：品牌服务 UUID 优先，再标准 SPP UUID，最后按端口号反射打开。 */
     private fun openSpp(ad: BluetoothAdapter, address: String, mine: Int) {
         val device = ad.getRemoteDevice(address)
+        val services = wantServices.toList()
+        val channels = wantChannels.toList()
         Thread {
             val sockets = mutableListOf<BluetoothSocket>()
-            for (uuid in wantServices) {
+            for (uuid in services) {
                 runCatching { sockets.add(device.createInsecureRfcommSocketToServiceRecord(UUID.fromString(uuid))) }
             }
             runCatching { sockets.add(device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)) }
-            for (channel in wantChannels) {
+            for (channel in channels) {
                 runCatching {
                     val method = device.javaClass.getMethod("createInsecureRfcommSocket", Int::class.javaPrimitiveType!!)
                     val sock = method.invoke(device, channel) as BluetoothSocket
@@ -437,41 +482,59 @@ class BmapBridge(
             }
             for (sock in sockets) {
                 try {
+                    if (!trackOpening(sock, mine)) { sock.close(); return@Thread }
                     sock.connect()
+                    synchronized(this) { if (openingSocket === sock) openingSocket = null }
                     if (mine != gen) {
                         runCatching { sock.close() }
                         return@Thread
                     }
-                    spp = sock
-                    link = "spp"
-                    sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
-                    connected(device.name ?: "耳机", "spp")
+                    main.post {
+                        if (mine != gen) { runCatching { sock.close() }; return@post }
+                        spp = sock
+                        link = "spp"
+                        connected(device.name ?: "耳机", "spp", mine)
+                        sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
+                    }
                     return@Thread
                 } catch (_: Exception) {
                     runCatching { sock.close() }
                 }
             }
-            if (mine == gen) fail("spp")
+            if (mine == gen) fail("spp", mine)
         }.start()
     }
 
     private fun trySpp(ad: BluetoothAdapter, mine: Int) {
-        val bonded = ad.bondedDevices?.firstOrNull { isBose(it.name ?: "") }
-            ?: return fail("none")
+        sppTried = true
+        val bonded = ad.bondedDevices?.firstOrNull {
+            if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "")
+        } ?: return fail("none", mine)
         Thread {
             try {
                 val sock = bonded.createInsecureRfcommSocketToServiceRecord(SPP_UUID)
+                if (!trackOpening(sock, mine)) { sock.close(); return@Thread }
                 sock.connect()
+                synchronized(this) { if (openingSocket === sock) openingSocket = null }
                 if (mine != gen) {
                     runCatching { sock.close() }
                     return@Thread
                 }
-                spp = sock
-                link = "spp"
-                sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
-                connected(bonded.name ?: "Bose", "spp")
-            } catch (_: Exception) {
-                fail("spp")
+                main.post {
+                    if (mine != gen) { runCatching { sock.close() }; return@post }
+                    spp = sock
+                    link = "spp"
+                    connected(bonded.name ?: "Bose", "spp", mine)
+                    sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
+                }
+            } catch (error: Exception) {
+                main.post {
+                    if (mine != gen) return@post
+                    log("rfcomm failed ${error.message}, try target gatt")
+                    runCatching { openingSocket?.close() }
+                    openingSocket = null
+                    connectGatt(bonded, mine)
+                }
             }
         }.start()
     }
@@ -482,29 +545,51 @@ class BmapBridge(
             while (true) {
                 val n = sock.inputStream.read(buf)
                 if (n <= 0) break
-                js("onDataReceived('${bytesToHex(buf.copyOf(n))}')")
+                event("onDataReceived", mine, bytesToHex(buf.copyOf(n)))
             }
         } catch (_: Exception) {
         }
-        if (mine == gen) js("onNativeDisconnected()")
+        event("onNativeDisconnected", mine)
     }
 
-    private fun connected(name: String, kind: String) {
-        val safe = name.replace("'", "\\'")
-        js("onNativeConnected('{\"name\":\"$safe\",\"link\":\"$kind\"}')")
+    private fun connected(name: String, kind: String, mine: Int) {
+        event("onNativeConnected", mine, org.json.JSONObject().put("name", name).put("link", kind))
     }
 
-    fun fail(msg: String) {
+    fun fail(msg: String, mine: Int = gen) {
+        if (mine != gen) return
         log("fail $msg")
-        js("onNativeError('$msg')")
+        event("onNativeError", mine, msg)
     }
 
+    private fun event(name: String, mine: Int, vararg values: Any) {
+        main.post {
+            if (mine != gen) return@post
+            val args = org.json.JSONArray()
+            values.forEach { args.put(it) }
+            args.put(session)
+            web.evaluateJavascript("$name(...$args)", null)
+        }
+    }
+
+    @Synchronized
+    private fun trackOpening(socket: BluetoothSocket, mine: Int): Boolean {
+        if (mine != gen) return false
+        openingSocket = socket
+        return true
+    }
+
+    @Synchronized
     private fun close() {
         gen += 1
+        gattWrites.clear()
+        writingGatt = false
         scanTimeout?.let { main.removeCallbacks(it) }
         scanTimeout = null
         scanCallback?.let { cb -> runCatching { adapter?.bluetoothLeScanner?.stopScan(cb) } }
         scanCallback = null
+        runCatching { openingSocket?.close() }
+        openingSocket = null
         runCatching { spp?.close() }
         spp = null
         sppThread = null

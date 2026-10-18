@@ -48,10 +48,33 @@ struct WebScreen: UIViewControllerRepresentable {
     func updateUIViewController(_ uiViewController: WebController, context: Context) {}
 }
 
-final class WebController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate, BleClientDelegate {
+final class NativeSession: BleClientDelegate {
+    let token: String
+    let client = BleClient()
+    private let emit: (String) -> Void
+
+    init(token: String, emit: @escaping (String) -> Void) {
+        self.token = token
+        self.emit = emit
+        client.delegate = self
+    }
+
+    private func send(_ name: String, _ values: [Any] = []) {
+        guard let data = try? JSONSerialization.data(withJSONObject: values + [token]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        emit("\(name)(...\(json))")
+    }
+
+    func bleDidConnect(name: String) { send("onNativeConnected", [["name": name, "link": "ble"]]) }
+    func bleDidFail(_ message: String) { send("onNativeError", [message]) }
+    func bleDidDisconnect() { send("onNativeDisconnected") }
+    func bleDidReceive(_ hex: String) { send("onDataReceived", [hex]) }
+}
+
+final class WebController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private var web: WKWebView!
     private var assets: WebBundleHandler?
-    private let ble = BleClient()
+    private var session: NativeSession?
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -90,7 +113,6 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         #endif
         lockGestures()
         view.addSubview(web)
-        ble.delegate = self
         web.load(URLRequest(url: URL(string: startURL)!))
     }
 
@@ -120,39 +142,26 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
-        case "bleScan", "bleConnect":
-            ble.scanAndConnect()
+        case "bleConnect":
+            guard let text = message.body as? String, let data = text.data(using: .utf8),
+                  let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                  let token = body["session"] as? String else { return }
+            session?.client.disconnect()
+            let next = NativeSession(token: token) { [weak self] code in self?.js(code) }
+            session = next
+            next.client.scanAndConnect()
         case "sendData":
-            if let hex = message.body as? String { ble.send(hex: hex) }
+            guard let text = message.body as? String, let data = text.data(using: .utf8),
+                  let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
+                  body["session"] == session?.token, let hex = body["hex"] else { return }
+            session?.client.send(hex: hex)
         case "bleDisconnect":
-            ble.disconnect()
+            guard let token = message.body as? String, token == session?.token else { return }
+            session?.client.disconnect()
+            session = nil
         default:
             break
         }
-    }
-
-    func bleDidConnect(name: String) {
-        js("onNativeConnected('{\"name\":\"\(escape(name))\",\"link\":\"ble\"}')")
-    }
-
-    func bleDidFail(_ message: String) {
-        js("onNativeError('\(escape(message))')")
-    }
-
-    func bleDidDisconnect() {
-        js("onNativeDisconnected()")
-    }
-
-    func bleDidReceive(_ hex: String) {
-        js("onDataReceived('\(hex)')")
-    }
-
-    private func escape(_ text: String) -> String {
-        text
-            .replacingOccurrences(of: "\\", with: "\\\\")
-            .replacingOccurrences(of: "'", with: "\\'")
-            .replacingOccurrences(of: "\n", with: " ")
-            .replacingOccurrences(of: "\r", with: " ")
     }
 
     private func js(_ code: String) {

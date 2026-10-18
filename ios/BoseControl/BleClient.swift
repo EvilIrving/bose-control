@@ -20,6 +20,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     private var connectTimer: DispatchWorkItem?
     private var reported = false
     private var writeQueue: [(Data, CBCharacteristic)] = []
+    private var writing = false
 
     private let scanSeconds = 6.0
     private let connectSeconds = 12.0
@@ -60,7 +61,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     /// CoreBluetooth 在 withoutResponse 缓冲满时会静默丢包，必须按 canSendWriteWithoutResponse 排队。
     private func flushWrites() {
-        guard let peripheral = target, let (data, ch) = writeQueue.first else { return }
+        guard !writing, let peripheral = target, let (data, ch) = writeQueue.first else { return }
         let useWithoutResponse = ch.properties.contains(.writeWithoutResponse)
         if useWithoutResponse {
             guard peripheral.canSendWriteWithoutResponse else { return }
@@ -81,15 +82,19 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
                 return
             }
             writeQueue.removeFirst()
+            writing = true
             peripheral.writeValue(data, for: ch, type: .withResponse)
         }
     }
 
     func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        guard peripheral === target else { return }
         flushWrites()
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        guard peripheral === target else { return }
+        writing = false
         if error != nil {
             writeQueue.removeAll()
             delegate?.bleDidFail("write")
@@ -99,6 +104,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func disconnect() {
+        central.stopScan()
         cancelTimers()
         wantScan = false
         if let peripheral = target { central.cancelPeripheralConnection(peripheral) }
@@ -179,6 +185,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         writeChar = nil
         reported = false
         writeQueue.removeAll()
+        writing = false
     }
 
     private func cancelTimers() {
@@ -236,24 +243,33 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         let services = advertisementData[CBAdvertisementDataServiceUUIDsKey] as? [CBUUID] ?? []
         let extra = advertisementData[CBAdvertisementDataOverflowServiceUUIDsKey] as? [CBUUID] ?? []
         let localName = advertisementData[CBAdvertisementDataLocalNameKey] as? String
-        found[peripheral.identifier] = Seen(
+        guard target == nil else { return }
+        let seen = Seen(
             peripheral: peripheral,
             rssi: RSSI.intValue,
             hasFebe: (services + extra).contains(where: isFebe),
             name: localName ?? peripheral.name
         )
+        found[peripheral.identifier] = seen
+        if seen.hasFebe || isBose(seen.name ?? "") {
+            central.stopScan()
+            connect(peripheral)
+        }
     }
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
-        peripheral.discoverServices(nil)
+        guard peripheral === target else { return }
+        peripheral.discoverServices([svcApk, svcSig])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
+        guard peripheral === target else { return }
         reset()
         delegate?.bleDidFail("refused")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
+        guard peripheral === target else { return }
         let wasConnected = reported
         reset()
         if wasConnected {
@@ -264,6 +280,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
+        guard peripheral === target else { return }
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
             central.cancelPeripheralConnection(peripheral)
             reset()
@@ -278,6 +295,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didDiscoverCharacteristicsFor service: CBService,
         error: Error?
     ) {
+        guard peripheral === target else { return }
         let chars = service.characteristics ?? []
         let ch = chars.first { $0.uuid == charSecure }
             ?? chars.first { $0.uuid == charPlain }
@@ -297,7 +315,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didUpdateNotificationStateFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard characteristic.uuid == writeChar?.uuid else { return }
+        guard peripheral === target, characteristic.uuid == writeChar?.uuid else { return }
         if error != nil || !characteristic.isNotifying {
             central.cancelPeripheralConnection(peripheral)
             reset()
@@ -312,7 +330,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        guard characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
+        guard peripheral === target, characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }
         delegate?.bleDidReceive(data.map { String(format: "%02x", $0) }.joined())

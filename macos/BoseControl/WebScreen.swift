@@ -49,11 +49,36 @@ struct WebScreen: NSViewControllerRepresentable {
     func updateNSViewController(_ nsViewController: WebController, context: Context) {}
 }
 
-final class WebController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate, BmapClientDelegate {
+final class NativeSession: BmapClientDelegate {
+    let token: String
+    let client = BmapClient()
+    private let emit: (String) -> Void
+
+    init(token: String, emit: @escaping (String) -> Void) {
+        self.token = token
+        self.emit = emit
+        client.delegate = self
+    }
+
+    private func send(_ name: String, _ values: [Any] = []) {
+        guard let data = try? JSONSerialization.data(withJSONObject: values + [token]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        emit("\(name)(...\(json))")
+    }
+
+    func bmapDidConnect(name: String, link: String) {
+        send("onNativeConnected", [["name": name, "link": link]])
+    }
+    func bmapDidFail(_ message: String) { send("onNativeError", [message]) }
+    func bmapDidDisconnect() { send("onNativeDisconnected") }
+    func bmapDidReceive(_ hex: String) { send("onDataReceived", [hex]) }
+}
+
+final class WebController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private let brandKey = "brand"
     private var web: WKWebView!
     private var assets: WebBundleHandler?
-    private let bmap = BmapClient()
+    private var session: NativeSession?
     // 上一次发给页面的设备列表，用来把轮询里没变化的日志压掉
     private var lastDeviceList = ""
 
@@ -97,7 +122,6 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         if #available(macOS 13.3, *) { web.isInspectable = true }
         #endif
         view.addSubview(web)
-        bmap.delegate = self
         web.load(URLRequest(url: URL(string: startURL)!))
     }
 
@@ -105,7 +129,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         switch message.name {
         case "bleScan":
             Diag.log("js bleScan（无参，只能盲扫 BLE）")
-            bmap.scanAndConnect(transport: "ble", address: nil, channels: [])
+            break
         case "bleConnect":
             // 页面统一发 JSON 字符串，Android 的 JS 接口只认字符串，这边跟着一起
             var body: [String: Any] = [:]
@@ -120,15 +144,20 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             let address = body["address"] as? String
             let channels = (body["channels"] as? [Int] ?? []).map { BluetoothRFCOMMChannelID($0) }
             let services = body["services"] as? [String] ?? []
-            bmap.scanAndConnect(transport: transport, address: address, channels: channels, services: services)
+            guard let token = body["session"] as? String else { return }
+            session?.client.disconnect()
+            let next = NativeSession(token: token) { [weak self] code in self?.js(code) }
+            session = next
+            next.client.scanAndConnect(transport: transport, address: address, channels: channels, services: services)
         case "sendData":
-            if let hex = message.body as? String {
-                Diag.debug("js sendData \(hex)")
-                bmap.send(hex: hex)
-            }
+            guard let text = message.body as? String, let data = text.data(using: .utf8),
+                  let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
+                  body["session"] == session?.token, let hex = body["hex"] else { return }
+            session?.client.send(hex: hex)
         case "bleDisconnect":
-            Diag.log("js bleDisconnect")
-            bmap.disconnect()
+            guard let token = message.body as? String, token == session?.token else { return }
+            session?.client.disconnect()
+            session = nil
         case "listDevices":
             let payload = HeadsetCatalog.json()
             // 页面自己轮询这一条（设备中心停留期间每 5 秒一次），只有内容变了才记一行
@@ -147,22 +176,6 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         }
     }
 
-    func bmapDidConnect(name: String, link: String) {
-        js("onNativeConnected('{\"name\":\"\(escape(name))\",\"link\":\"\(escape(link))\"}')")
-    }
-
-    func bmapDidFail(_ message: String) {
-        js("onNativeError('\(escape(message))')")
-    }
-
-    func bmapDidDisconnect() {
-        js("onNativeDisconnected()")
-    }
-
-    func bmapDidReceive(_ hex: String) {
-        js("onDataReceived('\(hex)')")
-    }
-
     private let nativeBridgeJS = """
     window.NativeBLE = {
       transports: ["ble", "spp"],
@@ -171,7 +184,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
       bleScan: function () { window.webkit.messageHandlers.bleScan.postMessage({}); },
       bleConnect: function (payload) { window.webkit.messageHandlers.bleConnect.postMessage(String(payload)); },
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
-      bleDisconnect: function () { window.webkit.messageHandlers.bleDisconnect.postMessage({}); },
+      bleDisconnect: function (session) { window.webkit.messageHandlers.bleDisconnect.postMessage(session); },
       listDevices: function () { window.webkit.messageHandlers.listDevices.postMessage({}); },
       setBrand: function (id) { window.webkit.messageHandlers.setBrand.postMessage(String(id)); }
     };

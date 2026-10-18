@@ -42,7 +42,7 @@ import {
   sidetonePayload,
   start,
 } from "./bmap.js";
-import { HeadsetLink } from "./transport.js";
+import { HeadsetLink, isCancelled } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
 import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, setBridgeAvailable, transportFor } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
@@ -68,7 +68,7 @@ import {
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
 
-const link = new HeadsetLink(brandById("bose").codec());
+let link = new HeadsetLink(brandById("bose").codec());
 const $ = (id) => document.getElementById(id);
 const ui = {
   status: $("status"),
@@ -113,7 +113,7 @@ const ui = {
   goListText: $("go-list-text"),
 };
 
-const state = {
+let state = {
   peers: [],
   selected: null,
   page: "devices",
@@ -324,6 +324,8 @@ function paintAll() {
   ui.deviceTrigger.hidden = !on;
   // 只在真有事的时候提示，别在首页堆一句「请先连接耳机」
   const hint = state.busy ? linkText("busy") : state.link === "idle" || state.link === "ready" ? "" : linkText(state.link);
+  const hintPage = page === "device" ? ui.pageDevice : ui.pageDevices;
+  if (ui.hint.parentElement !== hintPage) hintPage.appendChild(ui.hint);
   ui.hint.textContent = on ? "" : hint;
   if (!on) {
     deviceMenu.close(false);
@@ -365,10 +367,15 @@ async function loadPeers() {
   }
 }
 
+let hubSignature = "";
+
 function renderHub() {
   const list = state.peers ?? [];
   ui.hub.hidden = !hubReady() || list.length === 0;
-  if (ui.hub.hidden) return;
+  if (ui.hub.hidden) { hubSignature = ""; return; }
+  const signature = JSON.stringify([list, state.selected, sessionLive(), state.levels, getLang()]);
+  if (signature === hubSignature) return;
+  hubSignature = signature;
   ui.hub.innerHTML = "";
 
   for (const peer of list) {
@@ -469,43 +476,77 @@ function renderBrand() {
 
 function resetDevice() {
   session?.reset?.();
-  state.name = "";
-  state.battery = [];
-  state.eq = [];
-  state.cnc = null;
-  state.modesAll = [];
-  state.favorites = null;
-  state.shortcut = null;
-  state.devices = [];
-  state.hasTransport = false;
-  state.info = { product: "", productName: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  session = null;
+  ui.editor.hidden = true;
+  ui.editor.replaceChildren();
+  state = {
+    ...state,
+    name: "", battery: [], eq: [], cnc: null, modesAll: [], currentMode: null,
+    favorites: null, shortcut: null, devices: [], editing: null, hasTransport: false,
+    hasAudioSettings: false, channel15: null, sidetone: null, multipoint: null,
+    conversation: null, standby: null, voice: null, captouch: null, autoAnswer: null, autoPlay: null,
+    cfg: { cnc: 5, auto: false, spatial: 0, wind: false, anc: true },
+    info: { product: "", productName: "", firmware: "", serial: "", mac: "", made: "", hardware: "" },
+  };
 }
 
 async function connect(peer = null) {
   if (state.busy) return;
+  link.dispose();
+  resetDevice();
   state.busy = true;
   state.link = "idle";
   state.selected = peer?.address ?? null;
-  resetDevice();
   renderAll();
   const brandId = peer?.brand ?? getBrand();
   const brand = brandById(brandId) ?? brandById("bose");
   if (peer) setBrand(brand.id);
   setPage("device");
-  link.use(brand.codec());
-  session = brand.create({ link, ui, state, refresh: () => renderAll(), log });
-  link.onPacket = (packet) => session?.onPacket?.(packet);
+  const current = new HeadsetLink(brand.codec());
+  link = current;
+  const started = performance.now();
+  const elapsed = () => Math.round(performance.now() - started);
+  current.onDisconnected = () => {
+    if (link !== current) return;
+    state.busy = false;
+    resetDevice();
+    state.link = "lost";
+    setPage("devices");
+    refreshPeers();
+    renderAll();
+  };
+  log(`connect ${brand.id} start`);
   try {
-    await link.connect({
+    await current.connect({
       acceptAll: false,
       address: peer?.address,
       transport: transportFor(brand),
       channels: brand.channels ?? [],
       services: brand.services ?? [],
     });
-    ui.status.textContent = link.name || "";
-    if (await session.load()) {
+    if (link !== current || !current.active) return;
+    log(`connect channel ${elapsed()}ms`);
+    const scope = current.scope();
+    const refresh = () => {
+      if (link !== current || !scope.active) return;
+      if (state.link !== "ready" && session?.ready?.()) {
+        state.link = "ready";
+        state.busy = false;
+        log(`connect usable ${elapsed()}ms`);
+      }
+      renderAll();
+    };
+    session = brand.create({ link: scope, ui, state, refresh, log: (line) => {
+      if (scope.active) log(line);
+    } });
+    const activeSession = session;
+    current.onPacket = (packet) => activeSession.onPacket?.(packet);
+    const supported = await activeSession.load();
+    if (link !== current || !scope.active) return;
+    if (supported) {
+      if (state.link !== "ready") log(`connect usable ${elapsed()}ms`);
       state.link = "ready";
+      log(`connect initial reads ${elapsed()}ms`);
     } else {
       // 连上了但一条数据都没回来：断开并退回设备中心，别留一个空白设备页
       state.link = "noproto";
@@ -513,8 +554,11 @@ async function connect(peer = null) {
       setPage("devices");
     }
   } catch (err) {
+    if (link !== current || isCancelled(err)) return;
     log(err.message);
+    current.disconnect(err);
     state.link = linkOf(err);
+    setPage("devices");
   }
   state.busy = false;
   // 连上或者连失败都刷新一次：卡片状态不能停在连接前的快照上（连着的那台写着「未连接」，
@@ -526,6 +570,8 @@ async function connect(peer = null) {
 function disconnect() {
   state.link = "idle";
   link.disconnect();
+  state.busy = false;
+  resetDevice();
   setPage("devices");
   renderAll();
   refreshPeers();
@@ -634,15 +680,6 @@ function closeSettings() {
 
 ui.settingsOpen.addEventListener("click", openSettings);
 ui.settingsClose.addEventListener("click", closeSettings);
-
-link.onDisconnected = () => {
-  state.busy = false;
-  resetDevice();
-  if (state.link === "ready") state.link = "lost";
-  setPage("devices");
-  renderAll();
-  refreshPeers();
-};
 
 applyLabels();
 window.__boseApp = true;

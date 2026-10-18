@@ -46,6 +46,7 @@ export function createHuaweiCodec() {
   let feed = createParser();
   return {
     id: "huawei",
+    gapMs: 90,
     // 华为的控制通道是蓝牙串口（SPP），Web Bluetooth 只给 GATT，浏览器里够不着
     ble: false,
     filters: [],
@@ -104,6 +105,7 @@ export class HuaweiHeadset {
 
   reset() {
     this.info = {};
+    this.battery = null;
     this.anc = null;
     this.eq = null;
     this.gestures = null;
@@ -117,18 +119,23 @@ export class HuaweiHeadset {
   }
 
   async ask(cmd, params, timeout = 2500) {
-    return this.link.request(encode(cmd, params), timeout);
+    return this.link.request(encode(cmd, params), timeout, { priority: 1 });
   }
 
-  async read(cmd, types, timeout = 2500) {
-    // 耳机连续被问会闷掉，给它留一口气
-    await sleep(90);
-    return this.ask(cmd, types.map((type) => [type, EMPTY]), timeout);
+  async read(cmd, types, timeout = 2500, priority = 0) {
+    return this.link.request(encode(cmd, types.map((type) => [type, EMPTY])), timeout, { priority });
   }
 
-  async tryRead(cmd, types, timeout = 900) {
+  ready() {
+    const ancVisible = this.anc && (this.anc.modes.includes(1) || this.anc.mode !== 0) && this.anc.modes.length > 1;
+    return Boolean(this.eq?.presets.length || ancVisible || this.autoPause != null || this.lowLatency != null);
+  }
+
+  async tryRead(cmd, types, timeout = 900, priority = 1) {
     try {
-      return await this.read(cmd, types, timeout);
+      if (this.link.active === false) return null;
+      const reply = await this.read(cmd, types, timeout, priority);
+      return this.link.active === false ? null : reply;
     } catch (err) {
       this.log(err.message);
       return null;
@@ -137,7 +144,7 @@ export class HuaweiHeadset {
 
   // 探测能力：先短等一次（耳机支持的命令一百毫秒内就回），没回的交给调用方决定要不要补
   async probe(cmd, types, timeout = 900) {
-    return this.tryRead(cmd, types, timeout);
+    return this.tryRead(cmd, types, timeout, 0);
   }
 
   // 一趟能读多少读多少；onlyMissing 只补上一趟没读到的，slow 用长一点的超时再问
@@ -146,6 +153,7 @@ export class HuaweiHeadset {
     this.state.name = this.link.name || "HUAWEI";
     await this.loadPass(false, false);
     this.refresh();
+    if (this.link.active === false) return false;
     // 手势和已配对设备只影响设置页，放后台读
     void Promise.all([this.loadGestures(), this.loadDual()]).then(() => this.refresh());
     if (!this.answered()) {
@@ -179,9 +187,10 @@ export class HuaweiHeadset {
   }
 
   async loadPass(onlyMissing, slow) {
+    if (this.link.active === false) return;
     const jobs = [];
     const job = (condition, run) => {
-      if (condition) jobs.push(run());
+      if (condition && this.link.active !== false) jobs.push(run().then(() => this.refresh()));
     };
     const infoTimeout = slow ? 2000 : 800;
     const timeout = slow ? 1500 : 600;
@@ -327,6 +336,7 @@ export class HuaweiHeadset {
   }
 
   async loadGestures() {
+    if (this.link.active === false) return;
     const [double, triple, long, swipe] = await Promise.all([
       this.probeRetry(CMD.doubleRead, [1, 2, 3, 4]),
       this.probeRetry(CMD.tripleRead, [1, 2, 3, 4]),
@@ -342,6 +352,7 @@ export class HuaweiHeadset {
   }
 
   async loadDual() {
+    if (this.link.active === false) return;
     const enabled = await this.probeRetry(CMD.dualRead, [1]);
     if (!enabled) return;
     this.dual = { enabled: num(enabled, 1) === 1, devices: [] };
@@ -350,7 +361,7 @@ export class HuaweiHeadset {
 
   // 耳机是一台一台把已配对设备推上来的，没有总回包，只能等一小会儿收齐
   async loadDevices() {
-    if (!this.dual) return;
+    if (!this.dual || this.link.active === false) return;
     this.dual.devices = [];
     this.collecting = true;
     try {

@@ -1,12 +1,29 @@
 import { LocalBridge } from "./bridge.js";
 import { fromHex, hasNative, nativeCall, toHex } from "./native.js";
 
-// 同时最多几条请求在途。耳机对同一条命令只回一个包，所以窗口不能开太大，
-// 4 条足够把一次启动里几十条独立读取压成几轮往返，又不至于灌满蓝牙写队列。
 const MAX_IN_FLIGHT = 4;
+let nativeOwner = null;
+let nextSession = 0;
+const sessionPrefix = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+let installedWindow = null;
 
-// 只管「把字节送出去、把回包收回来」，具体怎么切包、怎么认出同一命令由 codec 决定：
-//   { id, filters, services, reset(), chunks(bytes, link), parse(chunk, link), key(packet), header(bytes) }
+export function cancelled() {
+  return Object.assign(new Error("会话已结束"), { code: "cancelled" });
+}
+
+export function isCancelled(error) {
+  return error?.code === "cancelled";
+}
+
+function installNativeRouter() {
+  if (installedWindow === window) return;
+  installedWindow = window;
+  window.onNativeConnected = (info, token) => nativeOwner?._native("connected", info, token);
+  window.onNativeDisconnected = (token) => nativeOwner?._native("disconnected", null, token);
+  window.onNativeError = (error, token) => nativeOwner?._native("error", error, token);
+  window.onDataReceived = (hex, token) => nativeOwner?._native("data", hex, token);
+}
+
 export class HeadsetLink {
   constructor(codec) {
     this.codec = codec;
@@ -23,16 +40,18 @@ export class HeadsetLink {
     this._queue = [];
     this._inFlight = 0;
     this._activeKeys = new Set();
-    this._bindNative();
-  }
-
-  use(codec) {
-    this.codec = codec;
+    this._epoch = 0;
+    this._closed = false;
+    this._token = null;
+    this._connectWait = null;
+    this._writeTail = Promise.resolve();
+    this._lastWriteAt = 0;
+    installNativeRouter();
   }
 
   get connected() {
     if (this.bridge) return this.bridge.open;
-    if (this.nativeOn) return this.nativeOn;
+    if (this.nativeOn) return true;
     return Boolean(this.server?.connected && this.char);
   }
 
@@ -40,231 +59,244 @@ export class HeadsetLink {
     return this.device?.name ?? "";
   }
 
-  _bindNative() {
-    window.onDataReceived = (hex) => {
-      this.handleNotify(fromHex(String(hex)));
-    };
-    window.onNativeConnected = (info) => {
-      const data = typeof info === "string" ? JSON.parse(info || "{}") : info || {};
+  get active() {
+    return !this._closed;
+  }
+
+  _check(epoch) {
+    if (this._closed || epoch !== this._epoch) throw cancelled();
+  }
+
+  _native(kind, value, token) {
+    if (this._closed || token !== this._token) return;
+    if (kind === "connected") {
+      if (!this._connectWait) return;
+      const data = typeof value === "string" ? JSON.parse(value || "{}") : value || {};
       this.nativeOn = true;
       this.link = data.link === "spp" ? "spp" : "ble";
       this.device = { name: data.name || "" };
-      this._connectWait?.resolve();
-      this._connectWait = null;
-    };
-    window.onNativeDisconnected = () => {
-      this.nativeOn = false;
-      this.char = null;
-      this.server = null;
-      this.rejectAll(new Error("蓝牙已断开"));
-      this._connectWait?.reject(new Error("蓝牙已断开"));
-      this._connectWait = null;
-      this.onDisconnected?.();
-    };
-    window.onNativeError = (msg) => {
-      this.lastError = String(msg || "native error");
-      // 这条只会在连接失败时来（原生端连上之后才上报 onNativeConnected），
-      // 不清掉的话界面会一直显示「断开连接」而实际没有会话。
-      this.nativeOn = false;
-      this._connectWait?.reject(new Error(this.lastError));
-      this._connectWait = null;
+      this._connectWait.resolve();
+    } else if (kind === "data") {
+      if (this.nativeOn) this.handleNotify(fromHex(String(value)));
+    } else {
+      const error = new Error(kind === "error" ? String(value || "native error") : "lost");
+      this.lastError = error.message;
+      const connecting = Boolean(this._connectWait);
+      this.disconnect(error);
+      if (!connecting) this.onDisconnected?.();
+    }
+  }
+
+  // A brand holds this connection-scoped view, never a reusable transport instance.
+  scope() {
+    const link = this;
+    const epoch = this._epoch;
+    return {
+      get active() { return !link._closed && epoch === link._epoch; },
+      get connected() { return this.active && link.connected; },
+      get name() { return this.active ? link.name : ""; },
+      get link() { return link.link; },
+      get nativeOn() { return this.active && link.nativeOn; },
+      get lastError() { return link.lastError; },
+      request(bytes, timeout, options) {
+        if (!this.active) return Promise.reject(cancelled());
+        return link.request(bytes, timeout, options);
+      },
+      write(bytes) {
+        if (!this.active) return Promise.reject(cancelled());
+        return link.write(bytes);
+      },
     };
   }
 
   async connect({ acceptAll = false, address = null, transport = null, channels = [], services = [] } = {}) {
+    this.disconnect();
+    this._closed = false;
+    const epoch = this._epoch;
     this.codec.reset?.();
-    // 上一台的设备和连接状态不能带进这一台：原生端连接的第一件事也是先断开，
-    // 留着旧值会让标题先显示上一台的名字、界面上写着「已连接」。
-    this.device = null;
-    this.nativeOn = false;
-    // 浏览器里没有原生桥，串口只能交给本机 server.py 代开
-    if (transport === "spp" && !hasNative()) {
-      const bridge = new LocalBridge();
-      bridge.onData = (bytes) => this.handleNotify(bytes);
-      bridge.onClose = () => {
-        this.bridge = null;
-        this.rejectAll(new Error("蓝牙已断开"));
-        this.onDisconnected?.();
-      };
-      await bridge.connect({ address, channels: channels.length ? channels : [1, 2, 3], services });
-      this.bridge = bridge;
-      this.link = "spp";
-      // 桥只认地址不认名字，名字交给品牌模块自己退到默认值
-      this.device = { name: "" };
-      return;
-    }
+    this.lastError = "";
+    this._lastWriteAt = 0;
     if (hasNative()) {
-      this.lastError = "";
+      if (nativeOwner && nativeOwner !== this) nativeOwner.disconnect();
+      nativeOwner = this;
+      this._token = `${sessionPrefix}-${++nextSession}`;
+      const token = this._token;
       await new Promise((resolve, reject) => {
-        // 原生端可能永远不回包（权限弹窗被系统吞掉、扫描被拦），超时就得放行重试
-        const timer = setTimeout(() => {
-          if (!this._connectWait) return;
+        const settle = (error) => {
+          clearTimeout(timer);
           this._connectWait = null;
-          this.lastError = "timeout";
-          try {
-            nativeCall("bleDisconnect");
-          } catch {
-            /* ignore */
-          }
-          reject(new Error("timeout"));
-        }, 30000);
-        this._connectWait = {
-          resolve: () => {
-            clearTimeout(timer);
-            resolve();
-          },
-          reject: (err) => {
-            clearTimeout(timer);
-            reject(err);
-          },
+          if (error) reject(error);
+          else resolve();
         };
+        const timer = setTimeout(() => {
+          if (epoch !== this._epoch) return;
+          this.lastError = "timeout";
+          this.disconnect(new Error("timeout"));
+        }, 30000);
+        this._connectWait = { resolve: () => settle(), reject: settle };
         try {
-          // 品牌、传输方式、串口候选都由调用方给，原生端不认识任何品牌
-          const wants = {
-            brand: this.codec.id,
+          nativeCall("bleConnect", JSON.stringify({
+            session: token,
             transport: transport ?? (this.codec.ble ? "ble" : "spp"),
             address: address ?? "",
             channels,
             services,
-          };
-          // 带参数的连接只走 bleConnect：Android 的 JS 接口只吃字符串，统一发 JSON 字符串。
-          // bleScan 是老桥的无参入口，进不了设备和端口，macOS 点设备中心就会连错。
-          if (globalThis.NativeBLE && typeof globalThis.NativeBLE.bleConnect === "function") {
-            nativeCall("bleConnect", JSON.stringify(wants));
-          } else {
-            nativeCall("bleScan", wants);
-          }
-        } catch (err) {
-          this._connectWait = null;
-          clearTimeout(timer);
-          reject(err);
+          }));
+        } catch (error) {
+          this.disconnect(error);
         }
       });
+      this._check(epoch);
       return;
     }
-    if (!this.codec.ble) throw new Error("这里连不了：" + this.codec.id);
-    if (!navigator.bluetooth) {
-      throw new Error("当前浏览器没有 Web Bluetooth。请用 Android Chrome。");
+    if (transport === "spp") {
+      const bridge = new LocalBridge();
+      this.bridge = bridge;
+      bridge.onData = (bytes) => {
+        if (!this._closed && epoch === this._epoch) this.handleNotify(bytes);
+      };
+      bridge.onClose = () => {
+        if (this._closed || epoch !== this._epoch) return;
+        this.disconnect(new Error("lost"));
+        this.onDisconnected?.();
+      };
+      await bridge.connect({ address, channels: channels.length ? channels : [1, 2, 3], services });
+      this._check(epoch);
+      this.link = "spp";
+      this.device = { name: "" };
+      return;
     }
+    if (!this.codec.ble) throw new Error("noproto");
+    if (!navigator.bluetooth) throw new Error("unsupported");
     const options = acceptAll
       ? { acceptAllDevices: true, optionalServices: this.codec.services }
       : { filters: this.codec.filters, optionalServices: this.codec.services };
     const device = await navigator.bluetooth.requestDevice(options);
+    this._check(epoch);
+    this.device = device;
     device.addEventListener("gattserverdisconnected", () => {
-      this.char = null;
-      this.server = null;
-      this.rejectAll(new Error("蓝牙已断开"));
+      if (this._closed || epoch !== this._epoch) return;
+      this.disconnect(new Error("lost"));
       this.onDisconnected?.();
     });
     const server = await device.gatt.connect();
-    const service = await this.openService(server);
-    const char = await this.openCharacteristic(service);
-    await char.startNotifications();
-    char.addEventListener("characteristicvaluechanged", (ev) => {
-      this.handleNotify(new Uint8Array(ev.target.value.buffer));
-    });
-    this.device = device;
+    if (this._closed || epoch !== this._epoch) {
+      server.disconnect();
+      throw cancelled();
+    }
     this.server = server;
+    const service = await this.openService(server);
+    this._check(epoch);
+    const char = await this.openCharacteristic(service);
+    this._check(epoch);
+    await char.startNotifications();
+    this._check(epoch);
+    char.addEventListener("characteristicvaluechanged", (ev) => {
+      if (this._closed || epoch !== this._epoch) return;
+      const value = ev.target.value;
+      this.handleNotify(new Uint8Array(value.buffer, value.byteOffset, value.byteLength));
+    });
     this.char = char;
+    this.link = "ble";
   }
 
   async openService(server) {
     for (const uuid of this.codec.services) {
       try {
         return await server.getPrimaryService(uuid);
-      } catch {
-        /* 试下一个 */
-      }
+      } catch { /* Try the next advertised control service. */ }
     }
-    throw new Error("no service");
+    throw new Error("service");
   }
 
   async openCharacteristic(service) {
     for (const uuid of this.codec.chars ?? []) {
       try {
         return await service.getCharacteristic(uuid);
-      } catch {
-        /* 试下一个 */
-      }
+      } catch { /* Try the alternate control characteristic. */ }
     }
-    throw new Error("no characteristic");
+    throw new Error("char");
   }
 
-  disconnect() {
-    if (this.bridge) {
-      this.bridge.close();
-      this.bridge = null;
-      return;
+  disconnect(error = cancelled()) {
+    const owner = nativeOwner === this;
+    const token = this._token;
+    this._closed = true;
+    this._writeTail = Promise.resolve();
+    this._connectWait?.reject(error);
+    this.rejectAll(error);
+    if (owner) {
+      nativeOwner = null;
+      try { nativeCall("bleDisconnect", token); } catch { /* Bridge may have been removed. */ }
     }
-    if (hasNative()) {
-      try {
-        nativeCall("bleDisconnect", {});
-      } catch {
-        /* ignore */
-      }
-      this.nativeOn = false;
-      return;
-    }
-    try {
-      this.device?.gatt?.disconnect();
-    } catch {
-      /* already gone */
-    }
-    this.char = null;
+    this._token = null;
+    this.nativeOn = false;
+    this.bridge?.close();
+    this.bridge = null;
+    this.device?.gatt?.disconnect();
+    this.device = null;
     this.server = null;
+    this.char = null;
+  }
+
+  dispose() {
+    this.disconnect();
+    this.onPacket = null;
+    this.onDisconnected = null;
   }
 
   handleNotify(chunk) {
+    if (this._closed) return;
     for (const packet of this.codec.parse(chunk, this.link)) {
-      this.onPacket?.(packet);
       const key = this.codec.key(packet);
-      const waiters = this.pending.get(key);
-      if (!waiters?.length) continue;
-      waiters.shift().resolve(packet);
-      if (!waiters.length) this.pending.delete(key);
+      this.pending.get(key)?.finish(null, packet);
+      this.onPacket?.(packet);
     }
   }
 
-  async write(packetBytes) {
-    const chunks = this.codec.chunks(packetBytes, this.link);
-    if (this.bridge) {
-      for (const chunk of chunks) this.bridge.send(chunk);
-      return;
-    }
-    if (hasNative() && this.nativeOn) {
-      for (const chunk of chunks) nativeCall("sendData", toHex(chunk));
-      return;
-    }
-    if (!this.char) throw new Error("未连接");
-    for (const chunk of chunks) {
-      const buf = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
-      if (this.char.properties.writeWithoutResponse) {
-        await this.char.writeValueWithoutResponse(buf);
-      } else {
-        await this.char.writeValue(buf);
+  write(packetBytes, onSend = () => {}) {
+    const epoch = this._epoch;
+    const send = async () => {
+      this._check(epoch);
+      const gap = this.codec.gapMs ?? 0;
+      const wait = this._lastWriteAt + gap - Date.now();
+      if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));
+      this._check(epoch);
+      this._lastWriteAt = Date.now();
+      onSend();
+      for (const chunk of this.codec.chunks(packetBytes, this.link)) {
+        this._check(epoch);
+        if (this.bridge) this.bridge.send(chunk);
+        else if (this.nativeOn && nativeOwner === this) {
+          nativeCall("sendData", JSON.stringify({ session: this._token, hex: toHex(chunk) }));
+        } else if (this.char) {
+          const buf = chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength);
+          if (this.char.properties.writeWithoutResponse) await this.char.writeValueWithoutResponse(buf);
+          else await this.char.writeValue(buf);
+        } else throw new Error("lost");
       }
-    }
+    };
+    const result = this._writeTail.then(send);
+    this._writeTail = result.catch(() => {});
+    return result;
   }
 
-  // 同一时刻最多几条请求在途。回包按命令号（fblock.func）配对，同一个命令同时只能有一条在途，
-  // 否则耳机乱序回包时会把结果配错；不同命令之间没有顺序要求，可以一起飞。
-  request(packetBytes, timeoutMs = 2500) {
+  request(packetBytes, timeoutMs = 2500, { priority = 0 } = {}) {
+    if (this._closed) return Promise.reject(cancelled());
     const header = this.codec.header(packetBytes);
     if (!header) return Promise.reject(new Error("空数据包"));
     const key = this.codec.key(header);
     return new Promise((resolve, reject) => {
-      this._queue.push({ packetBytes, timeoutMs, key, resolve, reject });
+      this._queue.push({ packetBytes, timeoutMs, priority, key, resolve, reject });
+      this._queue.sort((a, b) => b.priority - a.priority);
       this._pump();
     });
   }
 
   _pump() {
-    for (let i = 0; i < this._queue.length && this._inFlight < MAX_IN_FLIGHT; ) {
+    for (let i = 0; i < this._queue.length && this._inFlight < MAX_IN_FLIGHT;) {
       const job = this._queue[i];
-      if (this._activeKeys.has(job.key)) {
-        i += 1;
-        continue;
-      }
+      if (this._activeKeys.has(job.key)) { i += 1; continue; }
       this._queue.splice(i, 1);
       this._start(job);
     }
@@ -273,57 +305,28 @@ export class HeadsetLink {
   _start(job) {
     this._inFlight += 1;
     this._activeKeys.add(job.key);
-    this._send(job).then(
-      (packet) => {
-        this._release(job.key);
-        job.resolve(packet);
-      },
-      (err) => {
-        this._release(job.key);
-        job.reject(err);
-      },
-    );
+    let timer;
+    let settled = false;
+    const finish = (error, packet) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      this.pending.delete(job.key);
+      this._activeKeys.delete(job.key);
+      this._inFlight -= 1;
+      if (error) job.reject(error);
+      else job.resolve(packet);
+      this._pump();
+    };
+    this.pending.set(job.key, { finish });
+    this.write(job.packetBytes, () => {
+      if (!settled) timer = setTimeout(() => finish(new Error(`超时 ${job.key}`)), job.timeoutMs);
+    }).catch((error) => finish(error));
   }
 
-  _release(key) {
-    this._inFlight -= 1;
-    this._activeKeys.delete(key);
-    this._pump();
-  }
-
-  _send({ packetBytes, timeoutMs, key }) {
-    return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        const list = this.pending.get(key) ?? [];
-        this.pending.set(
-          key,
-          list.filter((item) => item.reject !== fail),
-        );
-        fail(new Error(`超时 ${key}`));
-      }, timeoutMs);
-      const fail = (err) => {
-        clearTimeout(timer);
-        reject(err);
-      };
-      const ok = (packet) => {
-        clearTimeout(timer);
-        resolve(packet);
-      };
-      const list = this.pending.get(key) ?? [];
-      list.push({ resolve: ok, reject: fail });
-      this.pending.set(key, list);
-      this.write(packetBytes).catch(fail);
-    });
-  }
-
-  rejectAll(err) {
-    for (const list of this.pending.values()) {
-      for (const item of list) item.reject(err);
-    }
-    this.pending.clear();
-    // 排队的请求不会再有回包，一起放掉
-    for (const job of this._queue.splice(0)) job.reject(err);
-    this._inFlight = 0;
-    this._activeKeys.clear();
+  rejectAll(error) {
+    this._epoch += 1;
+    for (const job of this._queue.splice(0)) job.reject(error);
+    for (const item of [...this.pending.values()]) item.finish(error);
   }
 }

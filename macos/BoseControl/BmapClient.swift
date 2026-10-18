@@ -15,6 +15,9 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
     private let rfcomm = RfcommClient()
     private var link = "ble"
     private var reported = false
+    private var triedBle = false
+    private var triedRfcomm = false
+    private var allowBle = true
 
     override init() {
         super.init()
@@ -30,18 +33,18 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
         rfcomm.target = address
         rfcomm.channels = channels
         rfcomm.services = services
-        if transport == "spp" {
-            Diag.log("spp connect \(address ?? "-") channels=\(channels) services=\(services)")
+        ble.targetName = rfcomm.targetName
+        triedBle = false
+        triedRfcomm = false
+        allowBle = transport != "spp"
+        if transport == "spp" || (address != nil && rfcomm.hasPairedDevice) {
+            triedRfcomm = true
+            Diag.log("known target，直接走 rfcomm")
             rfcomm.connect()
-            return
+        } else {
+            triedBle = true
+            ble.scanAndConnect()
         }
-        if let address, rfcomm.isConnected(address) {
-            Diag.log("classic 已连接，直接走 rfcomm")
-            rfcomm.connect()
-            return
-        }
-        Diag.log("ble 先扫")
-        ble.scanAndConnect()
     }
 
     func send(hex: String) {
@@ -68,7 +71,8 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
 
     func bleDidFail(_ message: String) {
         guard !reported else { return }
-        if rfcomm.hasPairedDevice {
+        if !triedRfcomm && rfcomm.hasPairedDevice {
+            triedRfcomm = true
             Diag.fail("ble 失败（\(message)），改试 rfcomm")
             rfcomm.connect()
             return
@@ -97,7 +101,12 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
     func rfcommDidFail(_ message: String) {
         guard !reported else { return }
         Diag.fail("rfcomm 失败：\(message)")
-        delegate?.bmapDidFail(message)
+        if allowBle && !triedBle {
+            triedBle = true
+            ble.scanAndConnect()
+        } else {
+            delegate?.bmapDidFail(message)
+        }
     }
 
     func rfcommDidDisconnect() {

@@ -86,7 +86,7 @@ xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 
 启动就进设备中心：`IOBluetoothDevice.pairedDevices()` 里挑出名字像 Bose / 华为的，按「已连接 → 未连接、同组按名字」排好，交给页面渲染。点一台就连一台：
 
-- **Bose**：先看经典蓝牙是不是已经连着，连着直接开 RFCOMM（channel 2，再试 8，再试 SDP 里找到的）；没连就先 BLE GATT FEBE，失败再 RFCOMM。
+- **Bose**：从设备中心点选已配对设备时直接尝试 RFCOMM，不先等 BLE 扫描超时。控制串口失败后尝试 BLE FEBE，候选名称必须匹配目标，允许 `LE-` 前缀差异。未指定设备时仍走 BLE。串口只尝试控制服务与明确的候选端口，不枚举其它音频端口。
 - **华为**：直接开 SPP。端口从 SDP 里按服务名（`Serial Port` / `Private COM`）取，取不到再试 1 / 2 / 3。不碰免提、A2DP 那些 RFCOMM 口，写进去会打断通话。
 
 ```bash
@@ -101,7 +101,7 @@ xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configurati
 
 `android/`。WebViewAssetLoader 加载 `assets/www/`。启动进设备中心，列 `bondedDevices` 里配过对的耳机，点一台连一台。
 
-- **Bose**：BLE 先扫，没有再试已配对设备的 RFCOMM（`00000000-deca-fade-deca-deafdecacaff`）。
+- **Bose**：点选设备后先找该地址已有的 GATT 连接，否则直接尝试该设备的 RFCOMM（`00000000-deca-fade-deca-deafdecacaff`），失败再试目标 GATT。只有未指定设备时才先扫描。BLE 地址与经典蓝牙地址不同的机型仍需真机验证。
 - **华为**：页面带上设备地址，先按标准 SPP UUID 开，不通再按端口 1 / 2 / 3 试。这条通道还没在 Android 真机上跑过。
 - **vivo / OPPO**：同一套 SPP 路径，默认关闭（见「未验证的品牌」）。
 
@@ -351,12 +351,19 @@ export const vivoBrand = {
 
 | 入口 | 作用 |
 | --- | --- |
-| `load()` | 连上后读全量状态，写进 `state`，返回「有没有读到东西」 |
+| `load()` | 连上后读全量状态，写进本次连接独立的 `state`，返回「有没有读到东西」 |
+| `ready()`（可选） | 已解析到可用控制时返回 true；宿主在 `refresh()` 时检查，不等 `load()` 全部结束 |
 | `render()` | 把主页面板画出来（谁回包画谁） |
 | `renderSettings()` | 设置页里属于这个品牌的部分 |
 | `onPacket(packet)` | 主动上报（电量变化、模式切换、连接受理） |
 
 `codec` 负责帧层：`chunks(bytes, link)` 怎么切、`parse(chunk, link)` 怎么拼回包、`key(packet)` 用什么做请求/回应对应、`header(bytes)` 从请求字节里取出包头的 key。
+
+每次连接使用独立的 `HeadsetLink` 和品牌状态。品牌只拿到绑定该连接的 `scope()`，旧后台任务不能向新设备写入。原生桥仍只有一个 owner，不提供多设备同时控制。构造新实例不会抢回调，调用 `connect()` 才交接。
+
+三端内置页面与原生桥必须一起更新：`bleConnect` 的 JSON 带 `session`；`sendData` 接收 `{session, hex}` 的 JSON 字符串；`bleDisconnect` 接收 session 字符串。连接、数据、错误回调都以 session 为最后一个参数，断开回调为 `onNativeDisconnected(session)`。设备列表回调不变。旧原生桥不能混用新版页面。
+
+Bose 和华为已确认可用的控制会先出现，其余能力继续读取，未回包的控件仍隐藏。请求最多四条在途，同命令串行，用户写入及确认读取优先于排队的后台探测。华为请求在实际发送处间隔 90ms，排队时间不计入回包超时。设置页诊断记录从点击到通道打开、控制可用和首轮读取完成的耗时；这些日志用于真机比较，不代表固定加载时间。
 
 原生端（`macos/BoseControl`、`android/`、`tools/bt-bridge`）不知道任何品牌：它只把系统里配对过的设备列表交给页面，连接时按页面给的 `transport` / `address` / `channels` / `services` 干活——`services` 是 16 字节的服务 UUID，串口端口号优先从 SDP 里按 UUID 找，找不到再按 `channels` 一个个试。所以加品牌不需要改原生代码。
 

@@ -99,7 +99,7 @@ function freeSlot() {
 }
 
 async function ask(packet, label, timeoutMs) {
-  const reply = await link.request(packet, timeoutMs ?? WRITE_TIMEOUT);
+  const reply = await link.request(packet, timeoutMs ?? WRITE_TIMEOUT, { priority: timeoutMs == null || timeoutMs === WRITE_TIMEOUT ? 1 : 0 });
   if (reply.op === OP.ERROR) {
     const code = reply.payload[0] ?? reply.payload[1] ?? "?";
     throw new Error(`${label} ${code}`);
@@ -109,7 +109,9 @@ async function ask(packet, label, timeoutMs) {
 
 async function tryAsk(packet, label, timeoutMs) {
   try {
-    return await ask(packet, label, timeoutMs);
+    if (link.active === false) return null;
+    const reply = await ask(packet, label, timeoutMs);
+    return link.active === false ? null : reply;
   } catch (err) {
     log(err.message);
     return null;
@@ -129,14 +131,14 @@ let retries = [];
 // 读一项设置，结果直接落到 state 上；没回就排队等后台补
 function read(packet, label, apply) {
   return tryAsk(packet, label, READ_TIMEOUT).then((reply) => {
-    if (reply) apply(reply);
-    else retries.push({ packet, label, apply });
+    if (reply) { apply(reply); refresh(); }
+    else if (link.active !== false) retries.push({ packet, label, apply });
   });
 }
 
 async function settleRetries() {
   const jobs = retries.splice(0);
-  if (!jobs.length) return;
+  if (!jobs.length || link.active === false) return;
   await Promise.all(
     jobs.map(async (job) => {
       const reply = await tryAsk(job.packet, job.label, RETRY_TIMEOUT);
@@ -155,6 +157,7 @@ async function writeAsk(packet, label) {
 }
 
 function renderModes() {
+  if (link.active === false) return;
   const modes = usableModes();
   const free = freeSlot();
   pane(ui.modes, modes.length > 0 || Boolean(free));
@@ -241,6 +244,7 @@ function slider(row, { min, max, value, onChange }) {
 }
 
 function renderCnc() {
+  if (link.active === false) return;
   pane(ui.cnc, state.cnc != null);
   if (state.cnc == null) return;
   ui.cnc.innerHTML = "";
@@ -273,6 +277,7 @@ function bandRow(band) {
 }
 
 function renderEq() {
+  if (link.active === false) return;
   pane(ui.eq, state.eq.length > 0);
   ui.eq.className = "";
   ui.eq.innerHTML = "";
@@ -280,6 +285,7 @@ function renderEq() {
 }
 
 function renderSpatial() {
+  if (link.active === false) return;
   pane(ui.spatial, state.hasAudioSettings);
   if (!state.hasAudioSettings) return;
   chips(
@@ -291,6 +297,7 @@ function renderSpatial() {
 }
 
 function renderSidetone() {
+  if (link.active === false) return;
   pane(ui.sidetone, state.sidetone != null);
   if (state.sidetone == null) return;
   chips(
@@ -302,6 +309,7 @@ function renderSidetone() {
 }
 
 function renderVoice() {
+  if (link.active === false) return;
   const voice = state.voice;
   pane(ui.voice, Boolean(voice && voice.supported.length));
   if (!voice || !voice.supported.length) return;
@@ -314,6 +322,7 @@ function renderVoice() {
 }
 
 function renderToggles() {
+  if (link.active === false) return;
   const items = [
     { key: "wind", label: t("wind"), on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
     { key: "mp", label: t("multipoint"), on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
@@ -332,6 +341,7 @@ function renderToggles() {
 }
 
 function renderBehaviour() {
+  if (link.active === false) return;
   const items = [
     { key: "touch", label: t("touch"), on: state.captouch === false, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
     { key: "answer", label: t("autoAnswer"), on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
@@ -350,6 +360,7 @@ function renderBehaviour() {
 }
 
 function renderTransport() {
+  if (link.active === false) return;
   pane(ui.transport, state.hasTransport);
   if (!state.hasTransport) return;
   chips(
@@ -366,6 +377,7 @@ function renderTransport() {
 }
 
 function renderFavorites() {
+  if (link.active === false) return;
   const modes = usableModes();
   const favorites = state.favorites;
   pane(ui.favorites, Boolean(favorites && modes.length));
@@ -379,6 +391,7 @@ function renderFavorites() {
 }
 
 function renderShortcut() {
+  if (link.active === false) return;
   const config = state.shortcut;
   pane(ui.shortcut, Boolean(config && config.supported.length));
   ui.shortcutTitle.textContent = config
@@ -394,6 +407,7 @@ function renderShortcut() {
 }
 
 function renderRename() {
+  if (link.active === false) return;
   pane(ui.rename, Boolean(state.name));
   if (!state.name) return;
   let input = ui.rename.querySelector("input");
@@ -413,6 +427,7 @@ function renderRename() {
 }
 
 function renderDevices() {
+  if (link.active === false) return;
   pane(ui.devices, state.devices.length > 0);
   if (!state.devices.length) return;
   fillRows(
@@ -422,6 +437,7 @@ function renderDevices() {
 }
 
 function renderHeadset() {
+  if (link.active === false) return;
   ui.headset.innerHTML = "";
   const pair = chip(t("pair"), false);
   armedClick(pair, () =>
@@ -434,6 +450,7 @@ function renderHeadset() {
 }
 
 function renderStandby() {
+  if (link.active === false) return;
   pane(ui.standby, state.standby != null);
   if (state.standby == null) return;
   chips(
@@ -467,16 +484,6 @@ async function loadDevice() {
   // 第一批：屏幕上立刻要看的东西。彼此不依赖，一起飞，屏幕不再等全量读完才出内容。
   const [versionReply] = await Promise.all([
     tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", READ_TIMEOUT),
-    read(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", (reply) => {
-      state.info.product = parseProductId(reply.payload);
-      state.info.productName = productName(productIdOf(reply.payload));
-    }),
-    read(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", (reply) => {
-      state.info.firmware = parseFirmware(reply.payload);
-    }),
-    read(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", (reply) => {
-      state.name = parseName(reply.payload) || link.name;
-    }),
     read(get(FBLOCK.STATUS, FUNC.BATTERY), "电量", (reply) => {
       state.battery = parseBattery(reply.payload);
     }),
@@ -486,6 +493,9 @@ async function loadDevice() {
     read(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", applyCfg),
     read(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", applyCnc),
     loadModes(),
+    read(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", (reply) => {
+      state.name = parseName(reply.payload) || link.name;
+    }),
   ]);
   log(versionReply ? "init-ok" : "init-silent");
 
@@ -494,9 +504,16 @@ async function loadDevice() {
 
   refresh();
 
-  // 第二批：设置页里的开关和列表，同样是各自独立的读取。首轮没回的直接挂到后台补，
-  // 不把已经能用的界面压在超时上。
+  if (link.active === false) return false;
+  // 剩余主页功能、设置和信息继续读取，不阻塞已回包的控制。
   await Promise.all([
+    read(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", (reply) => {
+      state.info.product = parseProductId(reply.payload);
+      state.info.productName = productName(productIdOf(reply.payload));
+    }),
+    read(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", (reply) => {
+      state.info.firmware = parseFirmware(reply.payload);
+    }),
     read(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", (reply) => {
       state.sidetone = parseSidetone(reply.payload);
     }),
@@ -544,6 +561,7 @@ async function loadDevice() {
 
 // 详情只在设备信息面板里看得到，留在后台读。
 async function loadDetail() {
+  if (link.active === false) return;
   await Promise.all([
     readDetail(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", (reply) => {
       state.info.serial = parseSerialNumber(reply.payload);
@@ -601,6 +619,7 @@ async function loadModes() {
   ];
   let miss = 0;
   for (const index of indices) {
+    if (link.active === false) return;
     const reply = await tryAsk(
       get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(index)),
       `m${index}`,
@@ -615,7 +634,7 @@ async function loadModes() {
     miss = 0;
     const mode = parseModeConfig(reply.payload);
     if (mode) state.modesAll.push(mode);
-    renderModes();
+    refresh();
   }
 }
 
@@ -656,6 +675,7 @@ function closeEditor() {
 }
 
 function renderEditor() {
+  if (link.active === false) return;
   const edit = state.editing;
   ui.editor.innerHTML = "";
   ui.editor.hidden = !edit;
@@ -1005,6 +1025,7 @@ async function setAutoPlayPause(on) {
   }
 
   return {
+    ready: () => Boolean(state.eq.length || state.cnc || usableModes().length || state.hasAudioSettings),
     load: loadDevice,
     reset: closeEditor,
     render,
@@ -1043,6 +1064,7 @@ const CHAR_PLAIN = "d417c028-9818-4354-99d1-2ac09d074591";
 
 export function createBoseCodec() {
   let reassembler = createReassembler();
+  let buffer = new Uint8Array();
   return {
     id: "bose",
     ble: true,
@@ -1060,14 +1082,26 @@ export function createBoseCodec() {
     chars: [CHAR_SECURE, CHAR_PLAIN],
     reset() {
       reassembler = createReassembler();
+      buffer = new Uint8Array();
     },
     // SPP 自己就是整包流，BLE 上要按 20 字节切片
     chunks(bytes, link) {
       return link === "spp" ? [bytes] : segment(bytes);
     },
     parse(chunk, link) {
-      const assembled = link === "spp" ? chunk : reassembler.push(chunk);
-      return assembled ? decodeAll(assembled) : [];
+      if (link !== "spp") {
+        const assembled = reassembler.push(chunk);
+        return assembled ? decodeAll(assembled) : [];
+      }
+      const incoming = new Uint8Array(buffer.length + chunk.length);
+      incoming.set(buffer);
+      incoming.set(chunk, buffer.length);
+      let end = 0;
+      while (end + 4 <= incoming.length && end + 4 + incoming[end + 3] <= incoming.length) {
+        end += 4 + incoming[end + 3];
+      }
+      buffer = incoming.slice(end);
+      return decodeAll(incoming.subarray(0, end));
     },
     key(packet) {
       return keyOf(packet);
