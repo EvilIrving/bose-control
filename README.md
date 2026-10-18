@@ -1,8 +1,16 @@
-# Bose 本地控制
+# bose-control
 
-BMAP 控制页。不登录官方云。电脑 Chrome 走 Web Bluetooth；iPhone / Mac / 部分 Android 走 App 壳里的原生蓝牙。
+不登录、不联网，用蓝牙直接控制 Bose 耳机。
 
-改 `web/` 之后跑 `scripts/sync-web.sh` 再编 App。
+官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，走 Bose 私有的 BMAP 协议改降噪、模式、均衡、侧音、双连这些设置，数据不出本机。
+
+- **网页版**：Chrome / Edge 的 Web Bluetooth，打开就能连
+- **App**：Android（BLE + RFCOMM）、iOS（BLE）、macOS（BLE + RFCOMM）
+- **按能力渲染**：不同 Bose 型号支持的功能不一样，耳机不回的功能整块隐藏，不会留一个空面板
+
+Controls Bose Bluetooth headphones over the BMAP protocol from the browser or a native app. No account, no cloud, no telemetry.
+
+改 `web/` 之后跑 `scripts/sync-web.sh` 再编 App（Android / iOS / macOS 三端共用同一份页面）。
 
 ## 电脑 Chrome
 
@@ -70,6 +78,6 @@ xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configurati
 - 连上了但 BMAP 一个回包都没有（比如连到别家耳机），会自动断开并提示「设备不支持」，不会留一个空白的控制页。
 - 能力探测失败会自动重试一次（超时翻倍），慢设备不会被误判成不支持。
 
-连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`请先连接耳机`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`设备不支持`、`连接已断开，重连`。每条都在 10 字以内，保证窄屏单行不换行。
+连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`请先连接耳机`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`设备不支持`、`请重新连接`。每条都在 10 字以内，保证窄屏单行不换行。
 
 已验证机型：Bose QuietComfort Ultra Headphones。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。
