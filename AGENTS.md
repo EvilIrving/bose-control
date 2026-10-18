@@ -110,6 +110,7 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
   - Android：`BmapBridge.kt` 末尾的 `object Diag`，同时写 `adb logcat -s BOSE`。
   - macOS：`RfcommClient.swift` 的 `enum Diag`（`os.Logger`，subsystem `cain.com.bosecontrol.mac`，全部 `privacy: .public`），同时写 stderr。
   - iOS：`BleClient.swift` 的 `enum Diag`（subsystem `cain.com.bosecontrol`）。
+- 页面起不来时也有出口：Android 的错误横幅本身可点（`bridge.exportDiag`），macOS / iOS 在加载失败或 WebView 进程被回收时弹原生提示，「导出诊断」只打包原生日志，不依赖页面。
 - 导出：页面把「系统信息 + 能力 + 设备列表 + 全流程日志」交给原生 `exportDiag(text)`，原生再拼上自己的系统信息和 `Diag.dump()` 写成 `.txt`：Android 存「下载」并调起分享，macOS 存 `~/Downloads` 并在 Finder 里选中，iOS 存 Documents 并弹分享面板。
 - 该记的东西：连接各阶段（transport / address / 通道打开耗时 / ready 耗时 / 首轮读完）、每条请求的 key 与超时、每次收发的字节数与分包方式、原生回调与 GATT/SPP 每一步、设备列表原样名字与品牌匹配结果、错误码。新增失败分支时必须补一条，写清「在哪一步、给了什么值、错误码是什么」。
 

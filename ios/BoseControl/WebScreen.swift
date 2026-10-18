@@ -121,6 +121,55 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         lockGestures()
     }
 
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        reportLoadFailure("provisional", error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        reportLoadFailure("navigation", error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Diag.fail("WebView 进程被系统回收，页面已停止")
+        offerNativeExport(reason: "WebView 进程被回收，页面日志可能已丢失")
+    }
+
+    // 页面起不来时没有设置页可点：原生日志 + 原生导出入口
+    private func reportLoadFailure(_ stage: String, _ error: Error) {
+        let ns = error as NSError
+        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)")
+        offerNativeExport(reason: "页面加载失败：\(ns.domain)/\(ns.code)")
+    }
+
+    private func offerNativeExport(reason: String) {
+        let alert = UIAlertController(title: "页面出问题了", message: reason + "\n可以导出一份原生日志。", preferredStyle: .alert)
+        alert.addAction(UIAlertAction(title: "导出诊断", style: .default) { [weak self] _ in
+            self?.exportNativeOnly(reason: reason)
+        })
+        alert.addAction(UIAlertAction(title: "关闭", style: .cancel))
+        present(alert, animated: true)
+    }
+
+    private func exportNativeOnly(reason: String) {
+        let text = "# Bose Connector 原生诊断\n\(reason)\n" + Diag.systemInfo() + "\n\n" + Diag.dump()
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+        let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Diag.log("原生导出 → \(url.lastPathComponent)")
+            let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+            if let pop = share.popoverPresentationController {
+                pop.sourceView = view
+                pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                pop.permittedArrowDirections = []
+            }
+            present(share, animated: true)
+        } catch {
+            Diag.fail("原生导出失败：\(error.localizedDescription)")
+        }
+    }
+
     private func lockGestures() {
         web.scrollView.minimumZoomScale = 1
         web.scrollView.maximumZoomScale = 1
@@ -164,7 +213,8 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
             let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
             do {
                 try full.write(to: url, atomically: true, encoding: .utf8)
-                Diag.log("导出诊断 → \(url.lastPathComponent)")
+                Diag.log("导出诊断 → \(url.lastPathComponent)（\(full.utf8.count)B）")
+                js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, error: nil)))")
                 let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
                 if let pop = share.popoverPresentationController {
                     pop.sourceView = view
@@ -173,7 +223,9 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                 }
                 present(share, animated: true)
             } catch {
-                Diag.log("导出诊断失败：\(error.localizedDescription)")
+                let detail = "\((error as NSError).domain)/\((error as NSError).code): \(error.localizedDescription)"
+                Diag.log("导出诊断失败：\(detail)")
+                js("onDiagExported(\(reportJSON(ok: false, path: url.path, bytes: 0, error: detail)))")
             }
         case "bleDisconnect":
             guard let token = message.body as? String, token == session?.token else { return }
@@ -182,6 +234,17 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         default:
             break
         }
+    }
+
+    private func reportJSON(ok: Bool, path: String, bytes: Int, error: String?) -> String {
+        let payload: [String: Any] = [
+            "ok": ok,
+            "path": path,
+            "bytes": bytes,
+            "error": error ?? "",
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 
     private func js(_ code: String) {

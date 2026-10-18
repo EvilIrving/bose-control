@@ -44,7 +44,7 @@ import {
 } from "./bmap.js";
 import { HeadsetLink, isCancelled } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
+import { brandById, brandForName, bridgeAvailable, brandsHere, missingCapabilities, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
 import { setUnverified, unverifiedOn } from "./experimental.js";
@@ -168,9 +168,14 @@ function log(line, scope = "app") {
 }
 
 // 页面上任何地方崩了都要留下痕迹，不然只有一行"点不动"可看
-window.addEventListener("error", (ev) => logLine("err", `${ev.message} @ ${ev.filename}:${ev.lineno}`));
+window.addEventListener("error", (ev) => {
+  const where = `${ev.filename || "?"}:${ev.lineno ?? "?"}:${ev.colno ?? "?"}`;
+  logLine("err", `${ev.message} @ ${where}${ev.error?.stack ? `\n${ev.error.stack}` : ""}`);
+});
 window.addEventListener("unhandledrejection", (ev) => {
-  logLine("err", `unhandled ${ev.reason?.message ?? ev.reason}`);
+  const reason = ev.reason;
+  const detail = reason?.stack ?? reason?.message ?? String(reason);
+  logLine("err", `unhandled ${detail}`);
 });
 
 // 当前这次连接用的是哪个品牌模块；宿主自己不认识任何品牌
@@ -216,18 +221,6 @@ function renderLanguage() {
 }
 
 // 一键导出：页面日志 + 设备列表原样 + 原生环境，交给原生写文件并调起分享
-// 这台机器上走不通的路，导出里明确写出来，免得看日志的人以为是 bug
-function unsupported() {
-  const caps = platformInfo();
-  const transports = Array.isArray(caps.transports) ? caps.transports : [];
-  const list = [];
-  if (hasNative() && !transports.includes("spp")) list.push("SPP（系统不开放给第三方）");
-  if (hasNative() && !transports.includes("ble")) list.push("BLE");
-  if (!hasNative() && !navigator.bluetooth) list.push("Web Bluetooth");
-  if (caps.hub !== true && !bridgeAvailable()) list.push("设备中心（枚举不到系统配对设备）");
-  return list;
-}
-
 function canExportDiag() {
   return typeof window.NativeBLE?.exportDiag === "function" ||
     Boolean(window.webkit?.messageHandlers?.exportDiag);
@@ -247,7 +240,7 @@ function exportDiag() {
     `设备名 ${state.name || link.name || "—"} / 通道 ${link.link} / 错误 ${link.lastError || "—"}`,
     `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
       (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
-    `不支持 ${unsupported().join(" / ") || "无"}`,
+    `不支持 ${missingCapabilities().join(" / ") || "无"}`,
     `日志 ${logCount()} 行（上限 3000，超出从头丢）`,
   ];
   const text = logText(header);
@@ -313,7 +306,10 @@ function renderDiag() {
   if (canExportDiag()) {
     const btn = chip(t("exportDiag"), false);
     btn.addEventListener("click", exportDiag);
-    ui.diagActions.appendChild(btn);
+    const state = document.createElement("span");
+    state.id = "diag-export-state";
+    state.className = "diag-note";
+    ui.diagActions.append(btn, state);
   }
 }
 
@@ -767,6 +763,7 @@ if (!navigator.bluetooth && !hasNative()) {
   ui.go.disabled = true;
   state.link = "unsupported";
 }
+for (const line of window.__bootErrors ?? []) logLine("err", `boot ${line}`);
 logLine("app", `boot ua=${navigator.userAgent}`);
 logLine("app", `platform=${JSON.stringify(platformInfo())}`);
 renderAll();

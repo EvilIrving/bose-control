@@ -359,7 +359,7 @@ enum Diag {
     }
 
     /// 由 macOS BleClient 在 `centralManagerDidUpdateState` 里更新
-    static var centralState = "-"
+    static var centralState = "not-observed"
 
     private static func remember(_ text: String) {
         let line = stamp.string(from: Date()) + " " + text

@@ -125,6 +125,51 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         web.load(URLRequest(url: URL(string: startURL)!))
     }
 
+    func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+        reportLoadFailure("provisional", error)
+    }
+
+    func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+        reportLoadFailure("navigation", error)
+    }
+
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
+        Diag.fail("WebView 进程被系统回收，页面已停止")
+        offerNativeExport(reason: "WebView 进程被回收，页面日志可能已丢失")
+    }
+
+    // 页面起不来时没有设置页可点：原生日志 + 原生导出入口
+    private func reportLoadFailure(_ stage: String, _ error: Error) {
+        let ns = error as NSError
+        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)")
+        offerNativeExport(reason: "页面加载失败：\(ns.domain)/\(ns.code)")
+    }
+
+    private func offerNativeExport(reason: String) {
+        let alert = NSAlert()
+        alert.messageText = "页面出问题了"
+        alert.informativeText = reason + "\n可以导出一份原生日志，不依赖页面。"
+        alert.addButton(withTitle: "导出诊断")
+        alert.addButton(withTitle: "关闭")
+        guard alert.runModal() == .alertFirstButtonReturn else { return }
+        exportNativeOnly(reason: reason)
+    }
+
+    private func exportNativeOnly(reason: String) {
+        let text = "# Bose Connector 原生诊断\n\(reason)\n" + Diag.systemInfo() + "\n\n" + Diag.dump()
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+        do {
+            try text.write(to: url, atomically: true, encoding: .utf8)
+            Diag.log("原生导出 → \(url.path)")
+            NSWorkspace.shared.activateFileViewerSelecting([url])
+        } catch {
+            Diag.fail("原生导出失败：\(error.localizedDescription)")
+        }
+    }
+
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "bleScan":
@@ -175,10 +220,13 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
             do {
                 try full.write(to: url, atomically: true, encoding: .utf8)
-                Diag.log("导出诊断 → \(url.path)")
+                Diag.log("导出诊断 → \(url.path)（\(full.utf8.count)B）")
+                js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, error: nil)))")
                 NSWorkspace.shared.activateFileViewerSelecting([url])
             } catch {
-                Diag.log("导出诊断失败：\(error.localizedDescription)")
+                let detail = "\((error as NSError).domain)/\((error as NSError).code): \(error.localizedDescription)"
+                Diag.log("导出诊断失败：\(detail)")
+                js("onDiagExported(\(reportJSON(ok: false, path: url.path, bytes: 0, error: detail)))")
             }
         case "setBrand":
             if let id = message.body as? String {
@@ -211,6 +259,17 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             .replacingOccurrences(of: "'", with: "\\'")
             .replacingOccurrences(of: "\n", with: " ")
             .replacingOccurrences(of: "\r", with: " ")
+    }
+
+    private func reportJSON(ok: Bool, path: String, bytes: Int, error: String?) -> String {
+        let payload: [String: Any] = [
+            "ok": ok,
+            "path": path,
+            "bytes": bytes,
+            "error": error ?? "",
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
+        return String(data: data, encoding: .utf8) ?? "{}"
     }
 
     private func js(_ code: String) {

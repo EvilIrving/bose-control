@@ -175,6 +175,8 @@ class BmapBridge(
         for (profile in profiles) {
             runCatching {
                 mgr.getConnectedDevices(profile).orEmpty().forEach { out.add((it.address ?: "").lowercase()) }
+            }.onFailure {
+                Diag.add("bt", "getConnectedDevices($profile) 失败 ${it.javaClass.simpleName}: ${it.message}")
             }
         }
         return out
@@ -210,59 +212,75 @@ class BmapBridge(
     /** 诊断用：系统/机型/权限/蓝牙开关/已配对台数，任何一项读不到都不抛。 */
     @JavascriptInterface
     fun env(): String {
-        val ad = adapter
-        val state = runCatching {
-            when {
-                ad == null -> 0
-                ad.isEnabled -> 1
-                else -> 2
+        fun granted(name: String): String = runCatching {
+            if (activity.checkSelfPermission(name) == PackageManager.PERMISSION_GRANTED) "granted" else "denied"
+        }.getOrElse { "unknown" }
+
+        val json = org.json.JSONObject()
+        val errors = org.json.JSONArray()
+        fun step(name: String, block: () -> Unit) {
+            try {
+                block()
+            } catch (e: Exception) {
+                errors.put("$name: ${e.javaClass.simpleName}: ${e.message}")
             }
-        }.getOrDefault(0)
-        val perm = runCatching {
-            fun granted(name: String) = activity.checkSelfPermission(name) == PackageManager.PERMISSION_GRANTED
-            val scan = if (Build.VERSION.SDK_INT >= 31) granted(Manifest.permission.BLUETOOTH_SCAN) else true
-            val conn = if (Build.VERSION.SDK_INT >= 31) granted(Manifest.permission.BLUETOOTH_CONNECT) else true
-            val fine = granted(Manifest.permission.ACCESS_FINE_LOCATION)
-            val coarse = granted(Manifest.permission.ACCESS_COARSE_LOCATION)
-            org.json.JSONObject()
-                .put("scan", scan)
-                .put("connect", conn)
-                .put("location", fine || coarse)
-                .put("locationService", runCatching { activity.locationEnabled() }.getOrDefault(false))
-        }.getOrElse { org.json.JSONObject().put("error", it.message ?: "perm") }
-        // bonded 是系统里配过的全部设备（页面「已配对设备」用这个数），bose 单独给一份便于对照
-        val bonded = runCatching { ad?.bondedDevices?.size }.getOrNull() ?: -1
-        val bose = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
-        val loc = if (runCatching { activity.locationEnabled() }.getOrDefault(false)) 1 else 0
-        val pkg = runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0) }.getOrNull()
-        val app = pkg?.versionName ?: "?"
-        return runCatching {
-            org.json.JSONObject()
-                .put("platform", "android")
-                .put("sdk", Build.VERSION.SDK_INT)
-                .put("release", Build.VERSION.RELEASE)
-                .put("oem", Build.MANUFACTURER)
-                .put("model", Build.MODEL)
-                .put("app", app)
-                .put("adapter", state)
-                .put("bonded", bonded)
-                .put("bose", bose)
-                .put("loc", loc)
-                .put("perm", perm)
-                .toString()
-        }.getOrElse { "{\"platform\":\"android\",\"error\":\"env \${it.message}\"}" }
+        }
+
+        step("platform") { json.put("platform", "android") }
+        step("sdk") { json.put("sdk", Build.VERSION.SDK_INT) }
+        step("release") { json.put("release", Build.VERSION.RELEASE) }
+        step("oem") { json.put("oem", Build.MANUFACTURER) }
+        step("model") { json.put("model", Build.MODEL) }
+        step("app") {
+            val info = activity.packageManager.getPackageInfo(activity.packageName, 0)
+            json.put("app", info.versionName ?: "?")
+            @Suppress("DEPRECATION")
+            json.put("appCode", info.versionCode)
+        }
+        step("webview") {
+            val pkg = androidx.webkit.WebViewCompat.getCurrentWebViewPackage(activity)
+            json.put("webview", pkg?.let { "${it.packageName} ${it.versionName}" } ?: "unknown")
+        }
+        step("adapter") {
+            val ad = adapter
+            json.put("adapter", when {
+                ad == null -> "absent"
+                ad.isEnabled -> "on"
+                else -> "off"
+            })
+        }
+        step("bonded") {
+            val ad = adapter
+            json.put("bonded", ad?.bondedDevices?.size ?: -1)
+            json.put("bose", ad?.bondedDevices?.count { isBose(it.name ?: "") } ?: -1)
+        }
+        step("perm") {
+            val perm = org.json.JSONObject()
+            val api31 = Build.VERSION.SDK_INT >= 31
+            perm.put("scan", if (api31) granted(Manifest.permission.BLUETOOTH_SCAN) else "not-applicable")
+            perm.put("connect", if (api31) granted(Manifest.permission.BLUETOOTH_CONNECT) else "not-applicable")
+            perm.put("fineLocation", granted(Manifest.permission.ACCESS_FINE_LOCATION))
+            perm.put("coarseLocation", granted(Manifest.permission.ACCESS_COARSE_LOCATION))
+            perm.put("locationService", runCatching { activity.locationEnabled() }
+                .fold({ if (it) "on" else "off" }, { "unknown" }))
+            json.put("perm", perm)
+        }
+        if (errors.length() > 0) json.put("errors", errors)
+        return json.toString()
     }
 
-    /** 页面把整份诊断文本交过来：写到「下载」目录，再调起分享。 */
     @JavascriptInterface
     fun exportDiag(text: String) {
         main.post {
+            var target: File? = null
             try {
                 val name = "bose-diag-" +
-                    SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt"
+                    SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date()) + ".txt"
                 val full = text + "\n\n==== 原生 ====\n" + env() + "\n\n" + Diag.dump() + "\n"
-                val dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
+                val root = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
+                val dir = File(root, "diagnostics").apply { mkdirs() }
                 val file = File(dir, name)
+                target = file
                 file.writeBytes(full.toByteArray())
                 Diag.add("diag", "导出 → ${file.absolutePath}（${file.length()}B）")
                 val uri = FileProvider.getUriForFile(activity, activity.packageName + ".diag", file)
@@ -272,10 +290,24 @@ class BmapBridge(
                     addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 }
                 activity.startActivity(Intent.createChooser(send, "导出诊断"))
+                report(file, null)
             } catch (e: Exception) {
-                Diag.add("diag", "导出失败：${e.message}")
+                Diag.add("diag", "导出失败：${e.javaClass.simpleName}: ${e.message}")
+                // 写了一半的文件不留
+                runCatching { target?.takeIf { it.exists() }?.delete() }
+                report(null, "${e.javaClass.simpleName}: ${e.message}")
             }
         }
+    }
+
+    /** 导出结果回传页面，按钮必须有反馈，不能点了没动静。 */
+    private fun report(file: File?, error: String?) {
+        val payload = org.json.JSONObject()
+            .put("ok", error == null)
+            .put("path", file?.absolutePath ?: "")
+            .put("bytes", file?.length() ?: 0)
+            .put("error", error ?: "")
+        web.evaluateJavascript("onDiagExported(${payload})", null)
     }
 
     fun scanInternal() {
@@ -407,8 +439,8 @@ class BmapBridge(
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
                 if (mine != gen || g !== gatt) return
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    Diag.add("bt", "discoverServices status=$status")
-                    return fail("service status=$status", mine)
+                    Diag.add("bt", "discoverServices 失败 status=$status（session=$session）")
+                    return fail("service", mine)
                 }
                 val svc = g.getService(SVC_APK) ?: g.getService(SVC_SIG) ?: return fail("service")
                 val ch = svc.getCharacteristic(CHAR_SECURE)
@@ -464,9 +496,9 @@ class BmapBridge(
                     if (mine != gen || g !== gatt) return@post
                     writingGatt = false
                     if (status != BluetoothGatt.GATT_SUCCESS) {
-                        log("gatt write 失败 status=$status")
+                        log("gatt write 失败 status=$status（session=$session）")
                         gattWrites.clear()
-                        fail("write status=$status", mine)
+                        fail("write", mine)
                     } else flushGatt()
                 }
             }

@@ -75,6 +75,22 @@ function transportsOf(brand) {
   return [brand.transport, brand.alt].filter(Boolean);
 }
 
+// 这台宿主走不通的路。导出诊断要写明，不然看日志的人会当成 bug。
+// iOS 没有 platform()，只能看桥暴露了哪些入口：有 bleScan 就说明 BLE 可用。
+export function missingCapabilities() {
+  const caps = platformInfo();
+  const transports = Array.isArray(caps.transports) ? caps.transports : [];
+  const hasBleBridge = typeof globalThis.webkit?.messageHandlers?.bleScan !== "undefined";
+  const hasBle = transports.includes("ble") || (!transports.length && (hasBleBridge || Boolean(globalThis.navigator?.bluetooth)));
+  const hasSpp = transports.includes("spp") || caps.hub === true;
+  const hasHub = caps.hub === true || bridgeUp;
+  const list = [];
+  if (!hasSpp) list.push("SPP（系统不开放给第三方）");
+  if (!hasBle) list.push("BLE");
+  if (!hasHub) list.push("设备中心（枚举不到系统配对设备）");
+  return list;
+}
+
 export function brandsHere() {
   const native = nativeTransports();
   const webBle = Boolean(globalThis.navigator?.bluetooth);

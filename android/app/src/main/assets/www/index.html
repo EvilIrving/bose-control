@@ -181,6 +181,19 @@
         <p id="unverified-hint" data-label="unverifiedHint"></p>
       </section>
     </section>
+    <script>
+      // 模块本身加载/解析失败时 app.js 还跑不起来，先在这里接住
+      window.__bootErrors = [];
+      window.addEventListener("error", function (event) {
+        window.__bootErrors.push(
+          String(event.message) + " @ " + (event.filename || "?") + ":" + (event.lineno || "?")
+        );
+      });
+      window.addEventListener("unhandledrejection", function (event) {
+        var reason = event.reason;
+        window.__bootErrors.push("reject " + (reason && (reason.stack || reason.message) || reason));
+      });
+    </script>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

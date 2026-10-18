@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="utf-8"?>
 <paths>
-    <external-files-path name="diag-downloads" path="Download/" />
-    <files-path name="diag-files" path="/" />
+    <external-files-path name="diag-downloads" path="Download/diagnostics/" />
+    <files-path name="diag-files" path="diagnostics/" />
 </paths>

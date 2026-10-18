@@ -32,7 +32,7 @@ enum Diag {
         return buffer.joined(separator: "\n")
     }
 
-    static var centralState = "-"
+    static var centralState = "not-observed"
 
     static func systemInfo() -> String {
         let info = Bundle.main.infoDictionary ?? [:]

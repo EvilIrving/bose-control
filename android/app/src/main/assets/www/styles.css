@@ -953,3 +953,12 @@ input.text:focus {
     max-width: 34rem;
   }
 }
+
+/* 诊断里导出结果那一行：小字，不加边框 */
+.diag-note {
+  display: block;
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  word-break: break-all;
+}

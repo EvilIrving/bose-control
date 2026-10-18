@@ -254,17 +254,27 @@ export class HeadsetLink {
   handleNotify(chunk) {
     if (this._closed) return;
     const hex = toHex(chunk);
-    // 先把原始字节记下来：解析抛错时这是唯一能看的东西。超过 128 字节截断并标出来
-    const shown = hex.length > 256 ? `${hex.slice(0, 256)}…(+${chunk.length - 128}B)` : hex;
-    logLine("rx", `raw ${chunk.length}B ${shown}`);
-    let packets = [];
+    // 原始字节一条不落：解析抛错时这是唯一能复现的东西。长包按 128 字节切片，
+    // 每片标出 offset / 总长 / 本帧序号，按序号拼回去就是原始流
+    const seq = (this._rxSeq = (this._rxSeq ?? 0) + 1);
+    if (chunk.length <= 128) {
+      logLine("rx", `raw #${seq} 0-${chunk.length}/${chunk.length}B ${hex}`);
+    } else {
+      for (let off = 0; off < hex.length; off += 256) {
+        const from = off / 2;
+        const to = Math.min(chunk.length, from + 128);
+        logLine("rx", `raw #${seq} ${from}-${to}/${chunk.length}B ${hex.slice(off, off + 256)}`);
+      }
+    }
+    let packets;
     try {
       packets = this.codec.parse(chunk, this.link);
     } catch (error) {
-      logLine("err", `parse 抛错 ${error.message}；原始 ${hex}`);
-      return;
+      // 记录后原样抛出：解析失败不能被悄悄变成「这条请求超时」
+      logLine("err", `parse 抛错 ${error.message}（#${seq} ${chunk.length}B）\n${error.stack ?? ""}`);
+      throw error;
     }
-    if (!packets.length) logLine("rx", "未成帧，等后续字节");
+    if (!packets.length) logLine("rx", `未成帧（#${seq}），等后续字节`);
     for (const packet of packets) {
       const key = this.codec.key(packet);
       const waited = this.pending.has(key);

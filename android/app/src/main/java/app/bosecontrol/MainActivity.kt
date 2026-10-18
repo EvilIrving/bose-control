@@ -168,12 +168,16 @@ class MainActivity : ComponentActivity() {
             append("WebView: ").append(webView).append("\n")
             append("Android ").append(Build.VERSION.RELEASE)
             append(" / ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
-            append("看 logcat -s BOSE 或重新打开 App 后导出诊断")
+            append("点这块横幅导出诊断；也可以 adb logcat -s BOSE")
         }
         Diag.add("web", "banner: $text")
         runOnUiThread {
             banner.text = text
             banner.visibility = View.VISIBLE
+            // 页面自己起不来时，设置页的导出按钮也不存在，留一个原生入口
+            banner.setOnClickListener {
+                bridge.exportDiag("页面未启动，页面日志不可用：\n$text")
+            }
         }
     }
 
