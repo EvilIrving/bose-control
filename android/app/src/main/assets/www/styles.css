@@ -108,10 +108,12 @@ body.idle header {
   position: fixed;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   margin: 0;
-  padding: 0 0 16vh;
+  padding: 0 1.5rem 16vh;
+  gap: 0.9rem;
 }
 
 body.idle h1,
@@ -124,6 +126,20 @@ body.idle #go {
   min-height: 3.4rem;
   padding: 0.9rem 2rem;
   font-size: 1.2rem;
+}
+
+#hint {
+  display: none;
+  margin: 0;
+  color: var(--dim);
+  font-size: 0.95rem;
+  text-align: center;
+  line-height: 1.4;
+  max-width: 16rem;
+}
+
+body.idle #hint:not(:empty) {
+  display: block;
 }
 
 button {

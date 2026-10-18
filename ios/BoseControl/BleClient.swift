@@ -19,6 +19,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     private var found: [UUID: CBPeripheral] = [:]
     private var scanWork: DispatchWorkItem?
     private var notifyWork: DispatchWorkItem?
+    private var waitWork: DispatchWorkItem?
 
     private let svcApk = CBUUID(string: "0000FEBE-0000-0000-0000-000000000000")
     private let svcSig = CBUUID(string: "FEBE")
@@ -42,6 +43,8 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         pendingScan = true
         scanWork?.cancel()
         notifyWork?.cancel()
+        waitWork?.cancel()
+        waitWork = nil
         if let p = target { central.cancelPeripheralConnection(p) }
         target = nil
         writeChar = nil
@@ -60,6 +63,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         connecting = false
         scanWork?.cancel()
         notifyWork?.cancel()
+        waitWork?.cancel()
         central.stopScan()
         if let p = target { central.cancelPeripheralConnection(p) }
         target = nil
@@ -71,6 +75,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         switch central.state {
         case .poweredOn:
             pendingScan = false
+            waitWork?.cancel()
             let connected = central.retrieveConnectedPeripherals(withServices: [svcApk, svcSig])
             for p in connected {
                 NSLog("BOSE already %@", p.name ?? p.identifier.uuidString)
@@ -84,13 +89,32 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             central.scanForPeripherals(withServices: nil, options: [CBCentralManagerScanOptionAllowDuplicatesKey: false])
             let work = DispatchWorkItem { [weak self] in self?.finishScan() }
             scanWork = work
-            DispatchQueue.main.asyncAfter(deadline: .now() + 8, execute: work)
-        case .unauthorized, .unsupported, .poweredOff:
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5, execute: work)
+        case .unauthorized:
             pendingScan = false
-            NSLog("BOSE bt state %d", central.state.rawValue)
+            waitWork?.cancel()
+            NSLog("BOSE bt denied")
+            delegate?.bleDidFail("denied")
+        case .unsupported:
+            pendingScan = false
+            waitWork?.cancel()
             delegate?.bleDidFail("bluetooth")
+        case .poweredOff:
+            pendingScan = false
+            waitWork?.cancel()
+            NSLog("BOSE bt off")
+            delegate?.bleDidFail("off")
         default:
             NSLog("BOSE bt wait %d", central.state.rawValue)
+            if waitWork == nil {
+                let work = DispatchWorkItem { [weak self] in
+                    guard let self, self.pendingScan else { return }
+                    self.pendingScan = false
+                    self.delegate?.bleDidFail(self.central.state == .poweredOff ? "off" : "bluetooth")
+                }
+                waitWork = work
+                DispatchQueue.main.asyncAfter(deadline: .now() + 4, execute: work)
+            }
         }
     }
 

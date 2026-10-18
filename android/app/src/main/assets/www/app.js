@@ -34,6 +34,7 @@ const ui = {
   meta: $("meta"),
   go: $("go"),
   goText: $("go-text"),
+  hint: $("hint"),
   controls: $("controls"),
   modes: $("modes"),
   cnc: $("cnc"),
@@ -74,7 +75,20 @@ const state = {
   battery: [],
   hasAudioSettings: false,
   busy: false,
+  hint: "",
 };
+
+function failText(err) {
+  const raw = String(err?.message || err || "");
+  const name = err?.name || "";
+  if (raw === "none" || name === "NotFoundError") return "没有找到耳机";
+  if (raw === "off" || raw === "bluetooth") return "蓝牙没打开";
+  if (raw === "denied" || name === "NotAllowedError") return "没有蓝牙权限";
+  if (raw === "connect" || raw === "service" || raw === "char" || name === "NetworkError") return "连接失败";
+  if (raw.includes("Web Bluetooth") || raw === "no native bridge") return "这边连不了蓝牙";
+  if (raw) return "连接失败";
+  return "连接失败";
+}
 
 function log(line) {
   console.debug(line);
@@ -298,6 +312,7 @@ function renderAll() {
   ui.go.classList.toggle("busy", state.busy && idle);
   ui.go.disabled = false;
   ui.goText.textContent = on ? "断开" : "连接";
+  ui.hint.textContent = idle && !state.busy ? state.hint : "";
   if (!on) {
     ui.status.textContent = "";
     ui.meta.textContent = "";
@@ -480,13 +495,16 @@ async function setCnc(level) {
 async function connect() {
   if (state.busy) return;
   state.busy = true;
+  state.hint = "";
   renderAll();
   try {
     await ble.connect({ acceptAll: false });
     ui.status.textContent = ble.name || "";
     await loadDevice();
+    state.hint = "";
   } catch (err) {
     log(err.message);
+    state.hint = failText(err);
   }
   state.busy = false;
   renderAll();
@@ -510,3 +528,4 @@ ble.onDisconnected = () => {
 window.__boseApp = true;
 if (!navigator.bluetooth && !hasNative()) ui.go.disabled = true;
 renderAll();
+if (hasNative()) connect();

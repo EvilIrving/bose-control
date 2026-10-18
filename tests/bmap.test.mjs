@@ -182,6 +182,7 @@ test("web files are a complete page", () => {
   assert.match(html, /id="eq"/);
   assert.match(html, /id="spatial"/);
   assert.match(html, /id="sidetone"/);
+  assert.match(html, /id="hint"/);
   assert.match(html, /app\.js/);
   assert.doesNotMatch(html, /不登录|本地控制|走 \[31\.10\]|刷新|其他/);
 });
