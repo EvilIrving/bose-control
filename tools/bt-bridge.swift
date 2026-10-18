@@ -1,7 +1,8 @@
 // 本机的蓝牙串口桥：浏览器给不了 SPP，就让这个进程代开 RFCOMM。
-//   bt-bridge list                     → 打印已配对设备 JSON
-//   bt-bridge open ADDRESS 1,2,3       → 打开串口；之后 stdin 收 "T <hex>"，stdout 出
-//                                        "C spp" / "D <hex>" / "E <code>"
+//   bt-bridge list                            → 打印已配对设备 JSON
+//   bt-bridge open ADDRESS 1,2,3 [UUID,...]   → 打开串口；之后 stdin 收 "T <hex>"，stdout 出
+//                                               "C spp" / "D <hex>" / "E <code>"
+// 给了服务 UUID 就先在 SDP 里按 UUID 找端口，找不到再按给定的端口号试。
 import Foundation
 import IOBluetooth
 
@@ -47,13 +48,15 @@ func pairedDevices() -> String {
 final class Opener: NSObject, IOBluetoothRFCOMMChannelDelegate {
     private let address: String
     private let channels: [BluetoothRFCOMMChannelID]
+    private let services: [String]
     private var queue: [BluetoothRFCOMMChannelID] = []
     private var channel: IOBluetoothRFCOMMChannel?
     private var done = false
 
-    init(address: String, channels: [BluetoothRFCOMMChannelID]) {
+    init(address: String, channels: [BluetoothRFCOMMChannelID], services: [String]) {
         self.address = address
         self.channels = channels
+        self.services = services
         super.init()
     }
 
@@ -70,8 +73,27 @@ final class Opener: NSObject, IOBluetoothRFCOMMChannelDelegate {
                 waited += 0.2
             }
         }
-        queue = channels
+        queue = serviceChannels(device) + channels
         next(device)
+    }
+
+    // 私有控制服务（vivo 0x0837、OPPO 0x079A）的端口号只能从 SDP 里读，不能猜
+    private func serviceChannels(_ device: IOBluetoothDevice) -> [BluetoothRFCOMMChannelID] {
+        var ids: [BluetoothRFCOMMChannelID] = []
+        for text in services {
+            let uuidBytes = bytesOf(text)
+            guard uuidBytes.count == 16 else { continue }
+            let uuid = uuidBytes.withUnsafeBytes { raw -> IOBluetoothSDPUUID? in
+                guard let base = raw.baseAddress else { return nil }
+                return IOBluetoothSDPUUID(bytes: base, length: 16)
+            }
+            guard let uuid, let record = device.getServiceRecord(for: uuid) else { continue }
+            var channelID: BluetoothRFCOMMChannelID = 0
+            if record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess, channelID > 0 {
+                ids.append(channelID)
+            }
+        }
+        return ids
     }
 
     private func next(_ device: IOBluetoothDevice) {
@@ -155,7 +177,14 @@ if args[1] == "open", args.count >= 4 {
         .split(separator: ",")
         .compactMap { UInt8($0.trimmingCharacters(in: .whitespaces)) }
         .map { BluetoothRFCOMMChannelID($0) }
-    let opener = Opener(address: args[2], channels: channels.isEmpty ? [1, 2, 3] : channels)
+    let services = args.count >= 5
+        ? args[4].split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+        : []
+    let opener = Opener(
+        address: args[2],
+        channels: channels.isEmpty ? [1, 2, 3] : channels,
+        services: services
+    )
     opener.start()
     RunLoop.main.run()
 }

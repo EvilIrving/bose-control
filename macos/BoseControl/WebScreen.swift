@@ -102,29 +102,40 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "bleScan":
+            Diag.log("js bleScan（无参，只能盲扫 BLE）")
             bmap.scanAndConnect(transport: "ble", address: nil, channels: [])
         case "bleConnect":
             // 页面统一发 JSON 字符串，Android 的 JS 接口只认字符串，这边跟着一起
             var body: [String: Any] = [:]
             if let text = message.body as? String, let data = text.data(using: .utf8) {
+                Diag.log("js bleConnect \(text)")
                 body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             } else if let dict = message.body as? [String: Any] {
+                Diag.log("js bleConnect \(dict)")
                 body = dict
             }
             let transport = body["transport"] as? String ?? "ble"
             let address = body["address"] as? String
             let channels = (body["channels"] as? [Int] ?? []).map { BluetoothRFCOMMChannelID($0) }
-            bmap.scanAndConnect(transport: transport, address: address, channels: channels)
+            let services = body["services"] as? [String] ?? []
+            bmap.scanAndConnect(transport: transport, address: address, channels: channels, services: services)
         case "sendData":
-            if let hex = message.body as? String { bmap.send(hex: hex) }
+            if let hex = message.body as? String {
+                Diag.debug("js sendData \(hex)")
+                bmap.send(hex: hex)
+            }
         case "bleDisconnect":
+            Diag.log("js bleDisconnect")
             bmap.disconnect()
         case "listDevices":
             let payload = HeadsetCatalog.json()
-            NSLog("BOSE listDevices %@", payload)
+            Diag.log("js listDevices → \(payload)")
             js("onDeviceList('\(escape(payload))')")
         case "setBrand":
-            if let id = message.body as? String { UserDefaults.standard.set(id, forKey: brandKey) }
+            if let id = message.body as? String {
+                Diag.log("js setBrand \(id)")
+                UserDefaults.standard.set(id, forKey: brandKey)
+            }
         default:
             break
         }
@@ -171,7 +182,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     private func js(_ code: String) {
         DispatchQueue.main.async {
             self.web.evaluateJavaScript(code) { _, error in
-                if let error { NSLog("BOSE js error %@", String(describing: error)) }
+                if let error { Diag.fail("js error \(error.localizedDescription)") }
             }
         }
     }

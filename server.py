@@ -231,8 +231,9 @@ class Handler(SimpleHTTPRequestHandler):
                         send({"t": "error", "code": "nobridge"})
                         continue
                     channels = ",".join(str(int(c)) for c in cmd.get("channels") or [1, 2, 3])
+                    services = ",".join(str(s) for s in cmd.get("services") or [])
                     proc = subprocess.Popen(
-                        [str(binary), "open", str(cmd.get("address", "")), channels],
+                        [str(binary), "open", str(cmd.get("address", "")), channels, services],
                         stdin=subprocess.PIPE,
                         stdout=subprocess.PIPE,
                         text=True,

@@ -86,10 +86,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         connecting = false
         let known = central.retrieveConnectedPeripherals(withServices: [svcSig, svcApk])
         if let device = known.first(where: { isBose($0.name ?? "") }) ?? (known.count == 1 ? known[0] : nil) {
-            NSLog("BOSE ble retrieveConnected %@", device.name ?? "")
+            Diag.log("ble retrieveConnected \(device.name ?? "-")")
             connect(device)
             return
         }
+        Diag.log("ble scan start（retrieveConnected 命中 \(known.count) 台）")
         central.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
@@ -107,9 +108,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             $0.hasFebe || isBose($0.name ?? $0.peripheral.name ?? "")
         }
         if let best = candidates.max(by: { $0.rssi < $1.rssi }) {
+            Diag.log("ble 扫描命中 \(candidates.count) 台，选 \(best.name ?? best.peripheral.identifier.uuidString) rssi=\(best.rssi)")
             connect(best.peripheral)
             return
         }
+        Diag.fail("ble 扫完没有候选（广播里看到 \(found.count) 台）")
         delegate?.bleDidFail("没找到耳机：确认耳机已开机、在旁边")
     }
 
@@ -117,11 +120,13 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         connecting = true
         target = peripheral
         peripheral.delegate = self
+        Diag.log("ble connect \(peripheral.name ?? "-") \(peripheral.identifier.uuidString)")
         central.connect(peripheral)
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.target === peripheral, !self.reported else { return }
             self.central.cancelPeripheralConnection(peripheral)
             self.reset()
+            Diag.fail("ble 连接 12 秒超时")
             self.delegate?.bleDidFail("连接耳机超时，请重试")
         }
         connectTimer = work
@@ -203,6 +208,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         reset()
+        Diag.fail("ble didFailToConnect \(error.map { String(describing: $0) } ?? "-")")
         delegate?.bleDidFail("耳机拒绝 BLE 连接")
     }
 
@@ -210,8 +216,10 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         let wasConnected = reported
         reset()
         if wasConnected {
+            Diag.log("ble 断开 \(error.map { String(describing: $0) } ?? "-")")
             delegate?.bleDidDisconnect()
         } else {
+            Diag.fail("ble 还没连上就断了 \(error.map { String(describing: $0) } ?? "-")")
             delegate?.bleDidFail("BLE 连接被断开")
         }
     }
@@ -220,9 +228,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
             central.cancelPeripheralConnection(peripheral)
             reset()
+            Diag.fail("ble 没有 FEBE 服务，服务列表 \((peripheral.services ?? []).map(\.uuid.uuidString))")
             delegate?.bleDidFail("耳机没有开放 BMAP 控制服务")
             return
         }
+        Diag.log("ble 有 FEBE 服务 \(svc.uuid.uuidString)，读特征")
         peripheral.discoverCharacteristics(nil, for: svc)
     }
 
@@ -238,9 +248,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard let ch else {
             central.cancelPeripheralConnection(peripheral)
             reset()
+            Diag.fail("ble 找不到控制特征，特征列表 \(chars.map(\.uuid.uuidString))")
             delegate?.bleDidFail("找不到耳机的控制通道")
             return
         }
+        Diag.log("ble 用特征 \(ch.uuid.uuidString) 订阅通知")
         writeChar = ch
         peripheral.setNotifyValue(true, for: ch)
     }
@@ -254,9 +266,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if error != nil || !characteristic.isNotifying {
             central.cancelPeripheralConnection(peripheral)
             reset()
+            Diag.fail("ble 订阅失败 \(error.map { String(describing: $0) } ?? "-") notifying=\(characteristic.isNotifying)")
             delegate?.bleDidFail("耳机拒绝了数据订阅")
             return
         }
+        Diag.log("ble 订阅成功")
         finish()
     }
 
@@ -268,6 +282,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }
+        Diag.debug("ble rx \(data.count)B \(HexBytes.hex(data))")
         delegate?.bleDidReceive(HexBytes.hex(data))
     }
 }
