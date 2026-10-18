@@ -19,6 +19,10 @@ import {
   parseBattery,
   parseCnc,
   parseEq,
+  parseFirmware,
+  parseMacAddress,
+  parseManufactured,
+  parseProductId,
   parseModeConfig,
   parseName,
   parseMultipoint,
@@ -173,10 +177,31 @@ test("parseModeConfig prefers the 32-byte device name, including 橡胶", () => 
   assert.equal(mode.name, "橡胶");
 });
 
+test("parseFirmware keeps the raw version string", () => {
+  const payload = new TextEncoder().encode("8.2.20+g34cf029");
+  assert.equal(parseFirmware(payload), "8.2.20+g34cf029");
+});
+
+test("parseMacAddress formats six bytes from the headset", () => {
+  assert.equal(
+    parseMacAddress(Uint8Array.of(0x68, 0xf2, 0x1f, 0x0d, 0x94, 0x89)),
+    "68:F2:1F:0D:94:89",
+  );
+});
+
+test("parseProductId reads product id then variant", () => {
+  assert.equal(parseProductId(Uint8Array.of(0x40, 0x82, 0x02)), "0x4082 · v2");
+});
+
+test("parseManufactured reads BCD day month year", () => {
+  assert.equal(parseManufactured(Uint8Array.of(0x25, 0x11, 0x20, 0x26)), "2026-11-25");
+});
+
 test("web files are a complete page", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const html = readFileSync(join(dir, "../web/index.html"), "utf8");
   assert.match(html, />连接</);
+  assert.match(html, /id="info"/);
   assert.match(html, /id="modes"/);
   assert.match(html, /id="cnc"/);
   assert.match(html, /id="eq"/);

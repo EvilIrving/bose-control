@@ -23,16 +23,29 @@ export const FBLOCK = {
 
 export const FUNC = {
   BMAP_VERSION: 0x01,
+  PRODUCT_ID: 0x03,
   NAME: 0x02,
   VOICE_PROMPTS: 0x03,
   STANDBY: 0x04,
   CNC: 0x05,
   FIRMWARE: 0x05,
+  MAC_ADDRESS: 0x06,
+  SERIAL_NUMBER: 0x07,
+  MANUFACTURED: 0x08,
+  HARDWARE_REVISION: 0x0a,
+  GUID: 0x0c,
+  ORIGINAL_NAME: 0x0f,
+  COMPONENT_ID: 0x11,
+  LE_AUDIO: 0x17,
   EQ: 0x07,
   BUTTONS: 0x09,
   MULTIPOINT: 0x0a,
   SIDETONE: 0x0b,
   CONVERSATION: 0x0d,
+  AUTO_PLAY_PAUSE: 0x18,
+  AUTO_ANSWER: 0x1b,
+  DISABLE_CAPTOUCH: 0x22,
+  AUDIO_VOLUME: 0x05,
   BATTERY: 0x02,
   POWER: 0x04,
   GET_ALL_MODES: 0x01,
@@ -212,6 +225,123 @@ export function parseBattery(payload) {
     if (rows.length) return rows;
   }
   return [{ level: payload[0], component: 0 }];
+}
+
+export function parseFirmware(payload) {
+  return cstr(payload);
+}
+
+export function parseSerialNumber(payload) {
+  return cstr(payload);
+}
+
+export function parseMacAddress(payload) {
+  if (payload.length !== 6) return "";
+  return [...payload].map((b) => b.toString(16).padStart(2, "0")).join(":").toUpperCase();
+}
+
+export function parseProductId(payload) {
+  if (payload.length < 3) return "";
+  const id = ((payload[0] & 0xff) << 8) | (payload[1] & 0xff);
+  return `0x${id.toString(16).padStart(4, "0").toUpperCase()} · v${payload[2]}`;
+}
+
+export function parseManufactured(payload) {
+  if (payload.length !== 4) return "";
+  const nibbles = [];
+  for (const byte of payload) nibbles.push(byte >> 4, byte & 0x0f);
+  const day = nibbles[0] * 10 + nibbles[1];
+  const month = nibbles[2] * 10 + nibbles[3];
+  const year = nibbles[4] * 1000 + nibbles[5] * 100 + nibbles[6] * 10 + nibbles[7];
+  if (!day || !month || year < 1900) return "";
+  return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+}
+
+export const VOICE_LANGUAGES = {
+  0: "英语（英）",
+  1: "英语（美）",
+  2: "法语",
+  3: "意大利语",
+  4: "德语",
+  5: "西班牙语（欧）",
+  6: "西班牙语（墨）",
+  7: "葡萄牙语（巴西）",
+  8: "中文",
+  9: "韩语",
+  10: "俄语",
+  11: "波兰语",
+  12: "希伯来语",
+  13: "土耳其语",
+  14: "荷兰语",
+  15: "日语",
+  16: "粤语",
+  17: "阿拉伯语",
+  18: "瑞典语",
+  19: "丹麦语",
+  20: "挪威语",
+  21: "芬兰语",
+  22: "印地语",
+};
+
+export function parseVoicePrompts(payload) {
+  if (!payload.length) return null;
+  const head = payload[0];
+  const language = head & 0x1f;
+  const bitmap =
+    payload.length >= 5
+      ? ((payload[1] << 24) | (payload[2] << 16) | (payload[3] << 8) | payload[4]) >>> 0
+      : 0;
+  const supported = [];
+  for (let id = 0; id < 23; id++) {
+    if ((bitmap >>> id) & 1) supported.push({ id, name: VOICE_LANGUAGES[id] ?? `语言 ${id}` });
+  }
+  return {
+    enabled: Boolean((head >> 5) & 1),
+    togglable: Boolean((head >> 6) & 1),
+    language,
+    languageName: VOICE_LANGUAGES[language] ?? `语言 ${language}`,
+    supported,
+  };
+}
+
+export function voicePromptPayload(enabled, language) {
+  return Uint8Array.of(((enabled ? 1 : 0) << 5) | (language & 0x1f));
+}
+
+export function parseVolume(payload) {
+  if (payload.length < 2) return null;
+  return { max: payload[0], level: payload[1] };
+}
+
+export function volumePayload(level) {
+  return Uint8Array.of(level & 0x7f);
+}
+
+export function parseFlag(payload) {
+  return Boolean(payload[0] & 1);
+}
+
+export function flagPayload(on) {
+  return Uint8Array.of(on ? 1 : 0);
+}
+
+export function parseGuid(payload) {
+  if (payload.length !== 16) return "";
+  const hex = [...payload].map((b) => b.toString(16).padStart(2, "0")).join("");
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ]
+    .join("-")
+    .toUpperCase();
+}
+
+export function parseComponentId(payload) {
+  if (payload.length < 7) return payload.length ? `组件 ${payload[0]}` : "";
+  return `组件 ${payload[0]} · ${parseMacAddress(payload.slice(1, 7))}`;
 }
 
 export function parseName(payload) {

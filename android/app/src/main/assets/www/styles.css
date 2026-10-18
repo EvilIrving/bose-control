@@ -260,6 +260,71 @@ section h2 {
   text-align: right;
 }
 
+.fold {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  min-height: 2.4rem;
+  padding: 0;
+  border-radius: 0;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+}
+
+.fold-label {
+  margin-right: auto;
+  color: var(--dim);
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.12em;
+}
+
+.chev {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  border-right: 1.5px solid var(--dim);
+  border-bottom: 1.5px solid var(--dim);
+  transform: rotate(45deg) translate(-0.1rem, -0.1rem);
+  transition: transform 0.15s ease;
+}
+
+.fold[aria-expanded="true"] .chev {
+  transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
+}
+
+#info {
+  display: grid;
+  gap: 0.5rem;
+  margin-top: 0.7rem;
+  padding: 0.75rem 0.9rem;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  border-radius: 0.9rem;
+}
+
+#info div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+#info span {
+  flex: none;
+  color: var(--dim);
+  font-size: 0.85rem;
+}
+
+#info b {
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  word-break: break-all;
+}
+
 [hidden] {
   display: none !important;
 }

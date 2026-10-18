@@ -14,6 +14,19 @@ import {
   parseCnc,
   parseConversation,
   parseEq,
+  parseFirmware,
+  parseMacAddress,
+  parseManufactured,
+  flagPayload,
+  parseComponentId,
+  parseFlag,
+  parseGuid,
+  parseProductId,
+  parseVoicePrompts,
+  parseVolume,
+  voicePromptPayload,
+  volumePayload,
+  parseSerialNumber,
   parseModeCaps,
   parseModeConfig,
   parseMultipoint,
@@ -34,9 +47,12 @@ const ui = {
   meta: $("meta"),
   go: $("go"),
   goText: $("go-text"),
+  info: $("info"),
+  deviceToggle: $("device-toggle"),
   hint: $("hint"),
   controls: $("controls"),
   modes: $("modes"),
+  volume: $("volume"),
   cnc: $("cnc"),
   eq: $("eq"),
   spatial: $("spatial"),
@@ -74,6 +90,23 @@ const state = {
   name: "",
   battery: [],
   hasAudioSettings: false,
+  info: {
+    product: "",
+    firmware: "",
+    serial: "",
+    mac: "",
+    made: "",
+    hardware: "",
+    guid: "",
+    originalName: "",
+    component: "",
+    leAudio: "",
+  },
+  voice: null,
+  captouch: null,
+  autoAnswer: null,
+  autoPlay: null,
+  volume: null,
   busy: false,
   hint: "",
 };
@@ -152,6 +185,43 @@ function chips(root, items, selected, onPick) {
   });
 }
 
+function fillRows(root, rows) {
+  root.innerHTML = "";
+  for (const [key, value, title] of rows) {
+    const line = document.createElement("div");
+    const label = document.createElement("span");
+    label.textContent = key;
+    const bold = document.createElement("b");
+    bold.textContent = value;
+    if (title) bold.title = title;
+    line.append(label, bold);
+    root.appendChild(line);
+  }
+}
+
+function shortVersion(version) {
+  return version ? String(version).split("+")[0] : "";
+}
+
+function renderInfo() {
+  const rows = [
+    ["型号", state.info.product],
+    ["固件", shortVersion(state.info.firmware), state.info.firmware],
+    ["序列号", state.info.serial],
+    ["MAC", state.info.mac],
+    ["生产", state.info.made],
+    ["硬件", state.info.hardware],
+  ].filter((row) => row[1]);
+  pane(ui.info, rows.length > 0);
+  fillRows(ui.info, rows);
+}
+
+function fold(button, body) {
+  const open = button.getAttribute("aria-expanded") === "true";
+  button.setAttribute("aria-expanded", String(!open));
+  body.hidden = open;
+}
+
 function renderModes() {
   const modes = usableModes();
   pane(ui.modes, modes.length > 0);
@@ -223,6 +293,21 @@ function slider(row, { min, max, value, onChange }) {
   row.append(track, num);
 }
 
+function renderVolume() {
+  pane(ui.volume, state.volume != null);
+  if (state.volume == null) return;
+  ui.volume.className = "band cnc-band";
+  slider(ui.volume, {
+    min: 0,
+    max: state.volume.max,
+    value: state.volume.level,
+    onChange: (level) => {
+      state.volume.level = level;
+      setVolume(level);
+    },
+  });
+}
+
 function renderCnc() {
   pane(ui.cnc, true);
   ui.cnc.innerHTML = "";
@@ -278,6 +363,9 @@ function renderToggles() {
     { key: "wind", label: "防风噪", on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
     { key: "mp", label: "双连", on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
     { key: "talk", label: "对话", on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
+    { key: "touch", label: "禁用触控", on: state.captouch, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
+    { key: "answer", label: "自动接听", on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
+    { key: "play", label: "自动播放", on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
   ];
   let n = 0;
   for (const item of items) {
@@ -320,6 +408,8 @@ function renderAll() {
   }
   ui.status.textContent = state.name || ble.name || "";
   ui.meta.textContent = batteryText();
+  renderInfo();
+  renderVolume();
   renderModes();
   renderCnc();
   renderEq();
@@ -331,6 +421,36 @@ function renderAll() {
 
 async function loadDevice() {
   await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", 1200);
+
+  const productReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", 1200);
+  if (productReply) state.info.product = parseProductId(productReply.payload);
+
+  const firmwareReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", 1200);
+  if (firmwareReply) state.info.firmware = parseFirmware(firmwareReply.payload);
+
+  const serialReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", 1200);
+  if (serialReply) state.info.serial = parseSerialNumber(serialReply.payload);
+
+  const macReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.MAC_ADDRESS), "MAC", 1200);
+  if (macReply) state.info.mac = parseMacAddress(macReply.payload);
+
+  const guidReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.GUID), "GUID", 1200);
+  if (guidReply) state.info.guid = parseGuid(guidReply.payload);
+
+  const originalReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.ORIGINAL_NAME), "原厂名称", 1200);
+  if (originalReply) state.info.originalName = parseFirmware(originalReply.payload);
+
+  const componentReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.COMPONENT_ID), "组件", 1200);
+  if (componentReply) state.info.component = parseComponentId(componentReply.payload);
+
+  const leAudioReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", 1200);
+  if (leAudioReply) state.info.leAudio = parseFlag(leAudioReply.payload) ? "支持" : "不支持";
+
+  const madeReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", 1200);
+  if (madeReply) state.info.made = parseManufactured(madeReply.payload);
+
+  const hardwareReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.HARDWARE_REVISION), "硬件", 1200);
+  if (hardwareReply) state.info.hardware = parseFirmware(hardwareReply.payload);
 
   const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", 1200);
   if (nameReply) state.name = parseName(nameReply.payload) || ble.name;
@@ -379,6 +499,21 @@ async function loadDevice() {
   }
 
   renderAll();
+  const voiceReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS), "语音提示", 1200);
+  if (voiceReply) state.voice = parseVoicePrompts(voiceReply.payload);
+
+  const autoPlayReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE), "自动播放", 1200);
+  if (autoPlayReply) state.autoPlay = parseFlag(autoPlayReply.payload);
+
+  const autoAnswerReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER), "自动接听", 1200);
+  if (autoAnswerReply) state.autoAnswer = parseFlag(autoAnswerReply.payload);
+
+  const captouchReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控", 1200);
+  if (captouchReply) state.captouch = parseFlag(captouchReply.payload);
+
+  const volumeReply = await tryAsk(get(FBLOCK.AUDIO, FUNC.AUDIO_VOLUME), "音量", 1200);
+  if (volumeReply) state.volume = parseVolume(volumeReply.payload);
+
   await loadModes();
   renderAll();
 }
@@ -492,10 +627,58 @@ async function setCnc(level) {
   state.cfg.cnc = level;
 }
 
+async function setVoicePrompt(enabled, language) {
+  const reply = await tryAsk(
+    setGet(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS, voicePromptPayload(enabled, language)),
+    "语音提示",
+  );
+  if (!reply) return false;
+  state.voice = { ...state.voice, enabled, language };
+  return true;
+}
+
+async function setCaptouchDisabled(disabled) {
+  const reply = await tryAsk(
+    setGet(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH, flagPayload(disabled)),
+    "触控",
+  );
+  if (!reply) return false;
+  state.captouch = disabled;
+  renderToggles();
+  return true;
+}
+
+async function setAutoAnswer(on) {
+  const reply = await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER, flagPayload(on)), "自动接听");
+  if (!reply) return false;
+  state.autoAnswer = on;
+  renderToggles();
+  return true;
+}
+
+async function setAutoPlayPause(on) {
+  const reply = await tryAsk(
+    setGet(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE, flagPayload(on)),
+    "自动播放",
+  );
+  if (!reply) return false;
+  state.autoPlay = on;
+  renderToggles();
+  return true;
+}
+
+async function setVolume(level) {
+  const reply = await tryAsk(setGet(FBLOCK.AUDIO, FUNC.AUDIO_VOLUME, volumePayload(level)), "音量");
+  if (!reply) return false;
+  state.volume = { ...(state.volume ?? {}), level };
+  return true;
+}
+
 async function connect() {
   if (state.busy) return;
   state.busy = true;
   state.hint = "";
+  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
   renderAll();
   try {
     await ble.connect({ acceptAll: false });
@@ -520,8 +703,17 @@ ui.go.addEventListener("click", () => {
   connect();
 });
 
+function collapse() {
+  ui.deviceToggle.setAttribute("aria-expanded", "false");
+  ui.info.hidden = true;
+}
+
+ui.deviceToggle.addEventListener("click", () => fold(ui.deviceToggle, ui.info));
+
 ble.onDisconnected = () => {
   state.busy = false;
+  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  collapse();
   renderAll();
 };
 
