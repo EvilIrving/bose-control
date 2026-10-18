@@ -44,16 +44,23 @@ body {
 header {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas:
-    "title go"
-    "meta go";
+  grid-template-areas: "head go";
   column-gap: 0.75rem;
   align-items: center;
   margin-bottom: 1.25rem;
 }
 
+#head {
+  grid-area: head;
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
 h1 {
-  grid-area: title;
+  flex: 0 100 auto;
+  min-width: 2.5rem;
   margin: 0;
   font-size: 1.2rem;
   font-weight: 650;
@@ -64,10 +71,14 @@ h1 {
 }
 
 #meta {
-  grid-area: meta;
+  flex: 0 1 auto;
+  min-width: 0;
   margin: 0;
+  overflow: hidden;
   color: var(--dim);
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 #go {
@@ -116,8 +127,7 @@ body.idle header {
   gap: 0.9rem;
 }
 
-body.idle h1,
-body.idle #meta {
+body.idle #head {
   display: none;
 }
 
@@ -260,27 +270,6 @@ section h2 {
   text-align: right;
 }
 
-.fold {
-  width: 100%;
-  display: flex;
-  align-items: center;
-  gap: 0.6rem;
-  min-height: 2.4rem;
-  padding: 0;
-  border-radius: 0;
-  background: none;
-  color: var(--fg);
-  text-align: left;
-}
-
-.fold-label {
-  margin-right: auto;
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
-}
-
 .chev {
   flex: none;
   width: 0.5rem;
@@ -291,14 +280,26 @@ section h2 {
   transition: transform 0.15s ease;
 }
 
-.fold[aria-expanded="true"] .chev {
+#device-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  padding: 0;
+  border-radius: 999px;
+  background: none;
+}
+
+#device-toggle[aria-expanded="true"] .chev {
   transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
 }
 
 #info {
   display: grid;
   gap: 0.5rem;
-  margin-top: 0.7rem;
+  margin: -0.5rem 0 1.1rem;
   padding: 0.75rem 0.9rem;
   background: var(--fill);
   border: 1px solid var(--line);

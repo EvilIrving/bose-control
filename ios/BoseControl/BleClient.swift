@@ -45,7 +45,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             return
         }
         guard central.state == .poweredOn else {
-            delegate?.bleDidFail(stateText)
+            delegate?.bleDidFail(stateCode)
             return
         }
         startScan()
@@ -65,15 +65,14 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         reset()
     }
 
-    private var stateText: String {
+    // 上报稳定的错误码，中文文案统一由 web/link.js 负责
+    private var stateCode: String {
         switch central.state {
-        case .poweredOn: return "蓝牙不可用"
-        case .poweredOff: return "蓝牙已关闭，请先打开蓝牙"
-        case .unauthorized: return "没有蓝牙权限，请到 设置 > 耳机 打开"
-        case .unsupported: return "这台设备不支持蓝牙"
-        case .resetting: return "蓝牙正在重置，请稍后重试"
-        case .unknown: return "蓝牙权限还没确认，请允许后重试"
-        @unknown default: return "蓝牙不可用"
+        case .poweredOff: return "off"
+        case .unauthorized: return "denied"
+        case .unsupported: return "unsupported"
+        case .resetting: return "resetting"
+        default: return "unknown"
         }
     }
 
@@ -106,7 +105,8 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             connect(device)
             return
         }
-        delegate?.bleDidFail("没找到耳机：确认耳机已开机、在旁边，并且没连着别的设备")
+        NSLog("BOSE scan timeout")
+        delegate?.bleDidFail("none")
     }
 
     private func connect(_ peripheral: CBPeripheral) {
@@ -118,7 +118,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             guard let self, self.target === peripheral, !self.reported else { return }
             self.central.cancelPeripheralConnection(peripheral)
             self.reset()
-            self.delegate?.bleDidFail("连接耳机超时，请重试")
+            self.delegate?.bleDidFail("timeout")
         }
         connectTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + connectSeconds, execute: work)
@@ -173,7 +173,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             startScan()
         } else if central.state != .unknown {
             wantScan = false
-            delegate?.bleDidFail(stateText)
+            delegate?.bleDidFail(stateCode)
         }
     }
 
@@ -200,7 +200,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         reset()
-        delegate?.bleDidFail("耳机拒绝连接，可能已连着别的设备")
+        delegate?.bleDidFail("refused")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
@@ -209,7 +209,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if wasConnected {
             delegate?.bleDidDisconnect()
         } else {
-            delegate?.bleDidFail("连接被耳机断开，请重试")
+            delegate?.bleDidFail("dropped")
         }
     }
 
@@ -217,7 +217,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
             central.cancelPeripheralConnection(peripheral)
             reset()
-            delegate?.bleDidFail("耳机没有开放 BMAP 控制服务")
+            delegate?.bleDidFail("service")
             return
         }
         peripheral.discoverCharacteristics(nil, for: svc)
@@ -235,7 +235,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard let ch else {
             central.cancelPeripheralConnection(peripheral)
             reset()
-            delegate?.bleDidFail("找不到耳机的控制通道")
+            delegate?.bleDidFail("char")
             return
         }
         writeChar = ch
@@ -251,7 +251,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         if error != nil || !characteristic.isNotifying {
             central.cancelPeripheralConnection(peripheral)
             reset()
-            delegate?.bleDidFail("耳机拒绝了数据订阅")
+            delegate?.bleDidFail("notify")
             return
         }
         finish()

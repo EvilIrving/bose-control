@@ -23,9 +23,7 @@ import {
   parseGuid,
   parseProductId,
   parseVoicePrompts,
-  parseVolume,
   voicePromptPayload,
-  volumePayload,
   parseSerialNumber,
   parseModeCaps,
   parseModeConfig,
@@ -38,6 +36,7 @@ import {
   start,
 } from "./bmap.js";
 import { BoseBle } from "./ble.js";
+import { batteryText, linkOf, linkText } from "./link.js";
 import { hasNative } from "./native.js";
 
 const ble = new BoseBle();
@@ -52,11 +51,11 @@ const ui = {
   hint: $("hint"),
   controls: $("controls"),
   modes: $("modes"),
-  volume: $("volume"),
   cnc: $("cnc"),
   eq: $("eq"),
   spatial: $("spatial"),
   sidetone: $("sidetone"),
+  voice: $("voice"),
   toggles: $("toggles"),
   standby: $("standby"),
 };
@@ -106,35 +105,9 @@ const state = {
   captouch: null,
   autoAnswer: null,
   autoPlay: null,
-  volume: null,
   busy: false,
-  hint: "",
+  link: "idle",
 };
-
-const FAIL_TEXT = {
-  none: "没有找到耳机",
-  off: "蓝牙没打开",
-  bluetooth: "蓝牙没打开",
-  adapter: "蓝牙没打开",
-  denied: "没有蓝牙权限",
-  connect: "连接失败",
-  service: "连接失败",
-  char: "连接失败",
-  write: "连接失败",
-  spp: "连接失败",
-  NotFoundError: "没有找到耳机",
-  NotAllowedError: "没有蓝牙权限",
-  NetworkError: "连接失败",
-};
-
-function failText(err) {
-  const raw = String(err?.message ?? err ?? "").trim();
-  const known = FAIL_TEXT[raw] || FAIL_TEXT[err?.name];
-  if (known) return known;
-  if (/Web Bluetooth/.test(raw) || raw === "no native bridge") return "这边连不了蓝牙";
-  const clause = raw.split(/[：:，,。；;、！!？?\s]/)[0];
-  return /[\u4e00-\u9fa5]/.test(clause) && clause.length <= 10 ? clause : "连接失败";
-}
 
 function log(line) {
   console.debug(line);
@@ -153,14 +126,6 @@ function usableModes() {
   });
 }
 
-function batteryText() {
-  if (!state.battery.length) return "";
-  if (state.battery.length === 1) return `${state.battery[0].level}%`;
-  return state.battery
-    .map((row) => `${row.component === 1 ? "盒" : row.component === 0 ? "左" : "右"} ${row.level}%`)
-    .join(" ");
-}
-
 async function ask(packet, label, timeoutMs) {
   const reply = await ble.request(packet, timeoutMs ?? 2500);
   if (reply.op === OP.ERROR) {
@@ -177,6 +142,20 @@ async function tryAsk(packet, label, timeoutMs) {
     log(err.message);
     return null;
   }
+}
+
+async function readInfo(packet, label) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const reply = await tryAsk(packet, label, 1200);
+    if (reply) return reply;
+  }
+  return null;
+}
+
+async function probe(packet, label, timeoutMs = 800) {
+  const first = await tryAsk(packet, label, timeoutMs);
+  if (first) return first;
+  return tryAsk(packet, label, timeoutMs * 2);
 }
 
 function pane(el, on) {
@@ -225,14 +204,14 @@ function renderInfo() {
     ["生产", state.info.made],
     ["硬件", state.info.hardware],
   ].filter((row) => row[1]);
-  pane(ui.info, rows.length > 0);
   fillRows(ui.info, rows);
+  ui.deviceToggle.hidden = rows.length === 0;
+  if (rows.length === 0) setInfo(false);
 }
 
-function fold(button, body) {
-  const open = button.getAttribute("aria-expanded") === "true";
-  button.setAttribute("aria-expanded", String(!open));
-  body.hidden = open;
+function setInfo(open) {
+  ui.deviceToggle.setAttribute("aria-expanded", String(open));
+  ui.info.hidden = !open;
 }
 
 function renderModes() {
@@ -306,23 +285,9 @@ function slider(row, { min, max, value, onChange }) {
   row.append(track, num);
 }
 
-function renderVolume() {
-  pane(ui.volume, state.volume != null);
-  if (state.volume == null) return;
-  ui.volume.className = "band cnc-band";
-  slider(ui.volume, {
-    min: 0,
-    max: state.volume.max,
-    value: state.volume.level,
-    onChange: (level) => {
-      state.volume.level = level;
-      setVolume(level);
-    },
-  });
-}
-
 function renderCnc() {
-  pane(ui.cnc, true);
+  pane(ui.cnc, state.cnc != null);
+  if (state.cnc == null) return;
   ui.cnc.innerHTML = "";
   ui.cnc.className = "band cnc-band";
   const max = cncMax();
@@ -370,6 +335,18 @@ function renderSidetone() {
   chips(ui.sidetone, SIDETONE_LABELS, state.sidetone, setSidetone);
 }
 
+function renderVoice() {
+  const voice = state.voice;
+  pane(ui.voice, Boolean(voice && voice.supported.length));
+  if (!voice || !voice.supported.length) return;
+  chips(
+    ui.voice,
+    voice.supported.map((language) => ({ key: language.id, label: language.name })),
+    voice.language,
+    (id) => setVoicePrompt(voice.enabled, id),
+  );
+}
+
 function renderToggles() {
   ui.toggles.innerHTML = "";
   const items = [
@@ -413,21 +390,21 @@ function renderAll() {
   ui.go.classList.toggle("busy", state.busy && idle);
   ui.go.disabled = false;
   ui.goText.textContent = on ? "断开" : "连接";
-  ui.hint.textContent = idle && !state.busy ? state.hint : "";
+  ui.hint.textContent = idle ? (state.busy ? linkText("busy") : linkText(state.link)) : "";
   if (!on) {
     ui.status.textContent = "";
     ui.meta.textContent = "";
     return;
   }
   ui.status.textContent = state.name || ble.name || "";
-  ui.meta.textContent = batteryText();
+  ui.meta.textContent = batteryText(state.battery);
   renderInfo();
-  renderVolume();
   renderModes();
   renderCnc();
   renderEq();
   renderSpatial();
   renderSidetone();
+  renderVoice();
   renderToggles();
   renderStandby();
 }
@@ -435,40 +412,40 @@ function renderAll() {
 async function loadDevice() {
   await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", 1200);
 
-  const productReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", 1200);
+  const productReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", 1200);
   if (productReply) state.info.product = parseProductId(productReply.payload);
 
-  const firmwareReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", 1200);
+  const firmwareReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", 1200);
   if (firmwareReply) state.info.firmware = parseFirmware(firmwareReply.payload);
 
-  const serialReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", 1200);
+  const serialReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", 1200);
   if (serialReply) state.info.serial = parseSerialNumber(serialReply.payload);
 
-  const macReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.MAC_ADDRESS), "MAC", 1200);
+  const macReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.MAC_ADDRESS), "MAC", 1200);
   if (macReply) state.info.mac = parseMacAddress(macReply.payload);
 
-  const guidReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.GUID), "GUID", 1200);
+  const guidReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.GUID), "GUID", 1200);
   if (guidReply) state.info.guid = parseGuid(guidReply.payload);
 
-  const originalReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.ORIGINAL_NAME), "原厂名称", 1200);
+  const originalReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.ORIGINAL_NAME), "原厂名称", 1200);
   if (originalReply) state.info.originalName = parseFirmware(originalReply.payload);
 
-  const componentReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.COMPONENT_ID), "组件", 1200);
+  const componentReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.COMPONENT_ID), "组件", 1200);
   if (componentReply) state.info.component = parseComponentId(componentReply.payload);
 
-  const leAudioReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", 1200);
+  const leAudioReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", 1200);
   if (leAudioReply) state.info.leAudio = parseFlag(leAudioReply.payload) ? "支持" : "不支持";
 
-  const madeReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", 1200);
+  const madeReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", 1200);
   if (madeReply) state.info.made = parseManufactured(madeReply.payload);
 
-  const hardwareReply = await tryAsk(get(FBLOCK.PRODUCT, FUNC.HARDWARE_REVISION), "硬件", 1200);
+  const hardwareReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.HARDWARE_REVISION), "硬件", 1200);
   if (hardwareReply) state.info.hardware = parseFirmware(hardwareReply.payload);
 
   const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", 1200);
   if (nameReply) state.name = parseName(nameReply.payload) || ble.name;
 
-  const batReply = await tryAsk(get(FBLOCK.STATUS, FUNC.BATTERY), "电量", 1200);
+  const batReply = await readInfo(get(FBLOCK.STATUS, FUNC.BATTERY), "电量");
   if (batReply) state.battery = parseBattery(batReply.payload);
 
   const eqReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡", 1200);
@@ -486,7 +463,7 @@ async function loadDevice() {
     }
   }
 
-  const cncReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", 800);
+  const cncReply = await probe(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", 800);
   if (cncReply) {
     state.cnc = parseCnc(cncReply.payload);
     if (state.hasAudioSettings && state.cfg.cnc != null) state.cnc.step = state.cfg.cnc;
@@ -494,16 +471,16 @@ async function loadDevice() {
 
   renderAll();
 
-  const sideReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", 800);
+  const sideReply = await probe(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", 800);
   if (sideReply) state.sidetone = parseSidetone(sideReply.payload);
 
-  const mpReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连", 800);
+  const mpReply = await probe(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连", 800);
   if (mpReply) state.multipoint = parseMultipoint(mpReply.payload);
 
-  const talkReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话", 500);
+  const talkReply = await probe(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话", 500);
   if (talkReply) state.conversation = parseConversation(talkReply.payload);
 
-  const autoReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机", 500);
+  const autoReply = await probe(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机", 500);
   if (autoReply) state.standby = parseStandby(autoReply.payload);
 
   if (state.hasAudioSettings) {
@@ -512,20 +489,17 @@ async function loadDevice() {
   }
 
   renderAll();
-  const voiceReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS), "语音提示", 1200);
+  const voiceReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS), "语音提示");
   if (voiceReply) state.voice = parseVoicePrompts(voiceReply.payload);
 
-  const autoPlayReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE), "自动播放", 1200);
+  const autoPlayReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE), "自动播放");
   if (autoPlayReply) state.autoPlay = parseFlag(autoPlayReply.payload);
 
-  const autoAnswerReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER), "自动接听", 1200);
+  const autoAnswerReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER), "自动接听");
   if (autoAnswerReply) state.autoAnswer = parseFlag(autoAnswerReply.payload);
 
-  const captouchReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控", 1200);
+  const captouchReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控");
   if (captouchReply) state.captouch = parseFlag(captouchReply.payload);
-
-  const volumeReply = await tryAsk(get(FBLOCK.AUDIO, FUNC.AUDIO_VOLUME), "音量", 1200);
-  if (volumeReply) state.volume = parseVolume(volumeReply.payload);
 
   await loadModes();
   renderAll();
@@ -647,6 +621,7 @@ async function setVoicePrompt(enabled, language) {
   );
   if (!reply) return false;
   state.voice = { ...state.voice, enabled, language };
+  renderVoice();
   return true;
 }
 
@@ -680,27 +655,32 @@ async function setAutoPlayPause(on) {
   return true;
 }
 
-async function setVolume(level) {
-  const reply = await tryAsk(setGet(FBLOCK.AUDIO, FUNC.AUDIO_VOLUME, volumePayload(level)), "音量");
-  if (!reply) return false;
-  state.volume = { ...(state.volume ?? {}), level };
-  return true;
+function hasBmapData() {
+  return Boolean(
+    state.name || state.battery.length || state.eq.length || state.cnc ||
+    state.modes.length || state.info.product || state.info.firmware,
+  );
 }
 
 async function connect() {
   if (state.busy) return;
   state.busy = true;
-  state.hint = "";
+  state.link = "idle";
   state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
   renderAll();
   try {
     await ble.connect({ acceptAll: false });
     ui.status.textContent = ble.name || "";
     await loadDevice();
-    state.hint = "";
+    if (hasBmapData()) {
+      state.link = "ready";
+    } else {
+      state.link = "noproto";
+      ble.disconnect();
+    }
   } catch (err) {
     log(err.message);
-    state.hint = failText(err);
+    state.link = linkOf(err);
   }
   state.busy = false;
   renderAll();
@@ -709,6 +689,7 @@ async function connect() {
 ui.go.addEventListener("click", () => {
   if (state.busy) return;
   if (ble.connected) {
+    state.link = "idle";
     ble.disconnect();
     renderAll();
     return;
@@ -716,21 +697,22 @@ ui.go.addEventListener("click", () => {
   connect();
 });
 
-function collapse() {
-  ui.deviceToggle.setAttribute("aria-expanded", "false");
-  ui.info.hidden = true;
-}
-
-ui.deviceToggle.addEventListener("click", () => fold(ui.deviceToggle, ui.info));
+ui.deviceToggle.addEventListener("click", () => {
+  setInfo(ui.deviceToggle.getAttribute("aria-expanded") !== "true");
+});
 
 ble.onDisconnected = () => {
   state.busy = false;
   state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
-  collapse();
+  setInfo(false);
+  if (state.link === "ready") state.link = "lost";
   renderAll();
 };
 
 window.__boseApp = true;
-if (!navigator.bluetooth && !hasNative()) ui.go.disabled = true;
+if (!navigator.bluetooth && !hasNative()) {
+  ui.go.disabled = true;
+  state.link = "unsupported";
+}
 renderAll();
 if (hasNative()) connect();

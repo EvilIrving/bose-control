@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
+import { LINK_TEXT, batteryText, linkOf } from "../web/link.js";
 import {
   FBLOCK,
   FUNC,
@@ -203,15 +204,60 @@ test("hint stays on one line on a narrow phone", () => {
   assert.match(css.match(/#hint \{([^}]*)\}/)[1], /white-space: nowrap/);
   assert.match(css.match(/#hint \{([^}]*)\}/)[1], /min-height: 1\.4em/);
   assert.match(css, /body\.idle #hint \{\s*display: block;/);
-
-  const js = readFileSync(join(dir, "../web/app.js"), "utf8");
-  const table = js.match(/const FAIL_TEXT = \{([\s\S]*?)\n\};/)[1];
-  const mapped = [...table.matchAll(/: "([^"]+)"/g)].map((m) => m[1]);
-  const returned = [...js.match(/function failText[\s\S]*?\n\}/)[0].matchAll(/return "([^"]+)"/g)];
-  assert.ok(mapped.length >= 10);
-  for (const text of [...mapped, ...returned.map((m) => m[1])]) {
-    assert.ok(text.length <= 10, `hint too long: ${text}`);
+  for (const [key, text] of Object.entries(LINK_TEXT)) {
+    assert.ok(text.length <= 10, `hint too long (${key}): ${text}`);
   }
+});
+
+test("linkOf turns native codes into one state each", () => {
+  const cases = [
+    ["none", "notfound"],
+    ["NotFoundError", "notfound"],
+    ["off", "off"],
+    ["adapter", "off"],
+    ["bluetooth", "off"],
+    ["permission", "denied"],
+    ["denied", "denied"],
+    ["NotAllowedError", "denied"],
+    ["unsupported", "unsupported"],
+    ["no native bridge", "unsupported"],
+    ["service", "noproto"],
+    ["char", "noproto"],
+    ["notify", "noproto"],
+    ["refused", "refused"],
+    ["dropped", "refused"],
+    ["timeout", "failed"],
+    ["connect", "failed"],
+    ["write", "failed"],
+    ["spp", "failed"],
+  ];
+  for (const [code, link] of cases) assert.equal(linkOf(new Error(code)), link, code);
+  assert.equal(linkOf({ name: "NotAllowedError", message: "boom" }), "denied");
+  assert.equal(linkOf("Failed to execute 'requestDevice' on 'Bluetooth'"), "failed");
+  assert.equal(linkOf("没找到耳机：确认耳机已开机"), "notfound");
+  assert.equal(linkOf("蓝牙已关闭，请先打开蓝牙"), "off");
+  assert.equal(linkOf(""), "failed");
+  assert.equal(linkOf(undefined), "failed");
+});
+
+test("battery labels follow the component count", () => {
+  assert.equal(batteryText([]), "");
+  assert.equal(batteryText([{ level: 80, component: 0 }]), "80%");
+  assert.equal(
+    batteryText([
+      { level: 92, component: 0 },
+      { level: 88, component: 1 },
+    ]),
+    "左 92% 右 88%",
+  );
+  assert.equal(
+    batteryText([
+      { level: 92, component: 0 },
+      { level: 50, component: 1 },
+      { level: 88, component: 2 },
+    ]),
+    "左 92% 盒 50% 右 88%",
+  );
 });
 
 test("web files are a complete page", () => {
@@ -225,6 +271,9 @@ test("web files are a complete page", () => {
   assert.match(html, /id="spatial"/);
   assert.match(html, /id="sidetone"/);
   assert.match(html, /id="hint"/);
+  assert.match(html, /id="device-toggle"/);
+  assert.ok(html.indexOf('id="info"') < html.indexOf('<main'), "设备信息面板要在 header 与 main 之间");
+  assert.doesNotMatch(html, /fold-label/);
   assert.match(html, /app\.js/);
   assert.doesNotMatch(html, /不登录|本地控制|走 \[31\.10\]|刷新|其他/);
 });

@@ -32,26 +32,21 @@
   </head>
   <body>
     <header>
-      <h1 id="status"></h1>
-      <p id="meta"></p>
+      <div id="head">
+        <h1 id="status"></h1>
+        <p id="meta"></p>
+        <button id="device-toggle" type="button" aria-expanded="false" aria-label="设备信息" hidden>
+          <i class="chev" aria-hidden="true"></i>
+        </button>
+      </div>
       <button id="go" type="button">
         <span id="go-text">连接</span>
         <i class="spin" aria-hidden="true"></i>
       </button>
       <p id="hint"></p>
     </header>
+    <div id="info" hidden></div>
     <main id="controls" hidden>
-      <section>
-        <button class="fold" id="device-toggle" type="button" aria-expanded="false">
-          <span class="fold-label">设备</span>
-          <i class="chev" aria-hidden="true"></i>
-        </button>
-        <div id="info" hidden></div>
-      </section>
-      <section>
-        <h2>音量</h2>
-        <div id="volume"></div>
-      </section>
       <section>
         <h2>模式</h2>
         <div id="modes" class="chips"></div>
@@ -73,7 +68,12 @@
         <div id="sidetone" class="chips"></div>
       </section>
       <section>
+        <h2>其它</h2>
         <div id="toggles" class="chips"></div>
+      </section>
+      <section>
+        <h2>语音提示</h2>
+        <div id="voice" class="chips"></div>
       </section>
       <section>
         <h2>关机</h2>

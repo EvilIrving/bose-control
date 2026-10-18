@@ -45,7 +45,6 @@ export const FUNC = {
   AUTO_PLAY_PAUSE: 0x18,
   AUTO_ANSWER: 0x1b,
   DISABLE_CAPTOUCH: 0x22,
-  AUDIO_VOLUME: 0x05,
   BATTERY: 0x02,
   POWER: 0x04,
   GET_ALL_MODES: 0x01,
@@ -96,7 +95,7 @@ export const PROMPTS = {
 };
 
 export const SIDETONE_LABELS = ["关", "高", "中", "低"];
-export const SPATIAL_LABELS = ["关", "房间", "头部"];
+export const SPATIAL_LABELS = ["关", "静态", "运动"];
 
 export function encode(fblock, func, operator, payload = new Uint8Array()) {
   const body = payload instanceof Uint8Array ? payload : Uint8Array.from(payload);
@@ -306,15 +305,6 @@ export function parseVoicePrompts(payload) {
 
 export function voicePromptPayload(enabled, language) {
   return Uint8Array.of(((enabled ? 1 : 0) << 5) | (language & 0x1f));
-}
-
-export function parseVolume(payload) {
-  if (payload.length < 2) return null;
-  return { max: payload[0], level: payload[1] };
-}
-
-export function volumePayload(level) {
-  return Uint8Array.of(level & 0x7f);
 }
 
 export function parseFlag(payload) {
