@@ -227,13 +227,16 @@ h1 {
   white-space: nowrap;
 }
 
-/* 顶栏的设备按钮：名字 + 电量 + 箭头，点开就是切换设备的下拉 */
+/* 顶栏的设备按钮：名字在上、电量和箭头在下，长名字也不会把电量挤没 */
 #device-trigger {
   flex: 1;
   min-width: 0;
   min-height: var(--control);
-  justify-content: flex-start;
-  padding: 0 0.7rem;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 0.5rem;
+  align-items: center;
+  padding: 0.35rem 0.7rem;
   border-color: var(--border);
   background: transparent;
   color: var(--foreground);
@@ -245,6 +248,8 @@ h1 {
 }
 
 #status {
+  grid-column: 1;
+  grid-row: 1;
   min-width: 0;
   overflow: hidden;
   font-size: 1.05rem;
@@ -254,21 +259,22 @@ h1 {
 }
 
 #meta {
-  flex: 0 1 auto;
+  grid-column: 1;
+  grid-row: 2;
   min-width: 0;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chev {
-  flex: none;
+  grid-column: 2;
+  grid-row: 1 / span 2;
   width: 0.5rem;
   height: 0.5rem;
-  margin-left: auto;
   border-right: 1.5px solid var(--muted-foreground);
   border-bottom: 1.5px solid var(--muted-foreground);
   transform: rotate(45deg) translate(-0.1rem, -0.1rem);
@@ -308,12 +314,16 @@ h1 {
 }
 
 .menu-item {
-  display: flex;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "label check"
+    "meta check";
+  column-gap: 0.5rem;
   align-items: center;
-  gap: 0.6rem;
   width: 100%;
   min-height: 2.75rem;
-  padding: 0 0.6rem;
+  padding: 0.45rem 0.6rem;
   border: 0;
   border-radius: var(--radius-sm);
   background: transparent;
@@ -333,26 +343,30 @@ h1 {
 }
 
 .menu-label {
+  grid-area: label;
   min-width: 0;
   overflow: hidden;
+  font-size: 0.95rem;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .menu-meta {
-  flex: none;
-  margin-left: auto;
+  grid-area: meta;
+  min-width: 0;
+  overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   font-weight: 400;
   font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .menu-check {
-  flex: none;
+  grid-area: check;
   width: 0.75rem;
   height: 0.75rem;
-  margin-left: 0.1rem;
 }
 
 .menu-check.on::before {
@@ -608,7 +622,7 @@ section h2 {
 
 .peer-card {
   display: grid;
-  grid-template-rows: auto auto auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 0.25rem;
   align-content: start;
   width: 100%;
@@ -675,6 +689,32 @@ section h2 {
 #info b {
   font-size: 0.95rem;
   font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  word-break: break-all;
+}
+
+/* 诊断等键值行：左边标签，右边值 */
+.rows {
+  display: grid;
+  gap: 0.55rem;
+}
+
+.rows div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.rows span {
+  flex: none;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+
+.rows b {
+  font-weight: 500;
   font-variant-numeric: tabular-nums;
   text-align: right;
   word-break: break-all;
@@ -849,6 +889,7 @@ input.text:focus {
     display: flex;
     flex-direction: column;
     gap: 1.5rem;
+    max-width: 52rem;
   }
 
   main > * + * {

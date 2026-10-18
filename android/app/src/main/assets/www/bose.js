@@ -561,6 +561,11 @@ async function loadDetail() {
     }),
   ]);
   refresh();
+  // 连上了但一个 BMAP 回包都没有（比如连到别家耳机），宿主据此判定「设备不支持」
+  return Boolean(
+    state.name || state.battery.length || state.eq.length || state.cnc ||
+    state.modesAll.length || state.info.product || state.info.firmware,
+  );
 }
 
 async function loadModes() {
