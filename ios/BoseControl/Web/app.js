@@ -763,15 +763,28 @@ async function loadModes() {
   const users = userReply?.payload.length
     ? [...userReply.payload]
     : Array.from({ length: caps?.user ?? 0 }, (_, i) => builtin + i);
-  const indices = [...new Set([...Array.from({ length: builtin }, (_, i) => i), ...users])];
-  if (!indices.length) indices.push(0, 1, 2, 3, 4, 5, 6, 7);
+  const guessing = users.length === 0;
+  const indices = [
+    ...new Set([
+      ...Array.from({ length: builtin }, (_, i) => i),
+      ...users,
+      ...Array.from({ length: guessing ? 8 : 0 }, (_, i) => builtin + i),
+    ]),
+  ];
+  let miss = 0;
   for (const index of indices) {
     const reply = await tryAsk(
       get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(index)),
       `m${index}`,
       900,
     );
-    if (!reply) continue;
+    if (!reply) {
+      if (!guessing) continue;
+      miss += 1;
+      if (miss >= 2) break;
+      continue;
+    }
+    miss = 0;
     const mode = parseModeConfig(reply.payload);
     if (mode) state.modesAll.push(mode);
     renderModes();
