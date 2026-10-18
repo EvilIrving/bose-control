@@ -630,31 +630,56 @@ section h2 {
   text-align: left;
 }
 
-/* 名字、品牌、状态点全在一行：品牌不单独占一行 */
+/* 名字 + 状态点一行排的通用行容器（设备页的块也用这个） */
 .peer-head {
   display: flex;
   align-items: center;
   gap: 0.45rem;
 }
 
+/* 设备名单独一行，永远不换行：单列双列都一样，放不下只出省略号 */
 .peer-card .peer-name {
-  flex: 1;
-  min-width: 0;
   font-weight: 600;
   line-height: 1.3;
   overflow: hidden;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 第二行：厂商词标 + 状态点 */
+.peer-card .peer-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
 }
 
 .peer-card .peer-brand {
   flex: none;
+  display: inline-flex;
+  align-items: center;
   color: var(--muted-foreground);
   font-size: 0.72rem;
   font-style: normal;
   font-weight: 400;
   white-space: nowrap;
+}
+
+/* 词标按各自画布的比例给高度，视觉上跟旁边的小字一般高 */
+.peer-card .peer-brand svg {
+  display: block;
+  width: auto;
+}
+.peer-card .peer-brand[data-brand="bose"] svg {
+  height: 0.66rem;
+}
+.peer-card .peer-brand[data-brand="huawei"] svg {
+  height: 0.66rem;
+}
+.peer-card .peer-brand[data-brand="vivo"] svg {
+  height: 0.68rem;
+}
+.peer-card .peer-brand[data-brand="oppo"] svg {
+  height: 0.7rem;
 }
 
 /* 状态只用一个点：绿 = 连着，灰 = 没连 */

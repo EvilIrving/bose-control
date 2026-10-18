@@ -67,6 +67,7 @@ import {
 } from "./labels.js";
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
+import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
 const $ = (id) => document.getElementById(id);
@@ -389,24 +390,36 @@ function renderHub() {
     const on = live || peer.connected;
     const status = t(on ? "connected" : "notConnected");
 
-    const head = document.createElement("div");
-    head.className = "peer-head";
-
+    // 第一行：设备名单独一行、不许换行，太长只出省略号
     const name = document.createElement("span");
     name.className = "peer-name";
     name.textContent = peer.name || peer.address;
+    name.title = peer.name || peer.address;
 
+    // 第二行：厂商词标 + 状态点；品牌文字只留在 title / aria-label 里
     const tag = document.createElement("i");
     tag.className = "peer-brand";
-    tag.textContent = brandById(peer.brand)?.label ?? peer.brand;
+    const brandLabel = brandById(peer.brand)?.label ?? peer.brand;
+    const mark = brandLogoSvg(peer.brand);
+    if (mark) {
+      tag.dataset.brand = peer.brand;
+      tag.title = brandLabel;
+      tag.setAttribute("aria-label", brandLabel);
+      tag.innerHTML = mark;
+    } else {
+      tag.textContent = brandLabel;
+    }
 
     const dot = document.createElement("span");
     dot.className = on ? "dot on" : "dot";
     dot.title = status;
     dot.setAttribute("aria-label", status);
 
-    head.append(name, tag, dot);
-    card.append(head);
+    const meta = document.createElement("div");
+    meta.className = "peer-meta";
+    meta.append(tag, dot);
+
+    card.append(name, meta);
 
     // 电量：读过的那台都有，没读过就空着，不编数字
     const level = state.levels[peer.address] ?? "";

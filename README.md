@@ -22,19 +22,30 @@ Controls Bose headphones over BMAP, HUAWEI earbuds over SPP, vivo / iQOO over GA
 
 | 页面 | 内容 | 怎么进出 |
 | --- | --- | --- |
-| 设备中心（首页） | 已配对的耳机，每台一个方块：名字 + 品牌 + 状态点（绿 = 连着，灰 = 没连）挤在一行；读到电量的那台在底下补一小串电量。已连接的排前面，组内按名字自然序 | 启动就到；列表自己刷新，没有手动刷新的按钮 |
+| 设备中心（首页） | 已配对的耳机，每台一个方块，三行：设备名（单行，不换行，太长出省略号）、品牌词标 + 状态点（绿 = 连着，灰 = 没连）、电量（真读到的才写）。已连接的排前面，组内按名字自然序 | 启动就到；列表自己刷新，没有手动刷新的按钮 |
 | 设备页 | 顶栏是可点的「名字」下拉，点开就列设备中心里的耳机，正在连的那台打勾，选别的直接换过去；名字右边是一小串电量，再往下是各功能面板 | 点方块进；右上角小箭头返回，或按 `Esc` |
 | 设置页 | 语言，各品牌自己的配置项，已配对设备，设备信息（产品名称 / 产品变型 / 固件版本 / 序列号 / 双耳序列号 / 蓝牙 MAC / 硬件版本），耳机操作，诊断 | 设备页底部「设置」进，右上角「完成」出 |
 
-- 界面不放耳机示意图，也不摆品牌 logo：设备靠名字认，电量就是一行小字。
+- 设备中心的方块上摆厂商词标（Bose / HUAWEI / vivo / OPPO），替掉原来的品牌文字；来源和商标归属见「品牌标识」。耳机示意图不放。
 - 电量按耳机报的组件写，读不到就不写（不拿 0% 凑数）：三段是 `左 96% · 右 100% · 盒 59%`（英文环境是 `L / R / Case`），只有一条读数就只写 `60%`。设备页写在名字右边，设备中心的方块上写在底下。
 - 返回**不断开**：回到设备中心时那台设备仍连着、方块高亮，再点它就是回到控制页，不会重连。
-- 方块右端的状态点：绿 = 连着（App 会话开着，或者系统链路还在），灰 = 没连。文字版「已连接 / 未连接」只留在 `title` / `aria-label` 里给读屏。
+- 词标后面的状态点：绿 = 连着（App 会话开着，或者系统链路还在），灰 = 没连。文字版「已连接 / 未连接」只留在 `title` / `aria-label` 里给读屏。
 - 要真断开在设置页「耳机操作 → 断开连接」，或者顶栏下拉里的「断开连接」。
 - 顶栏下拉在没有设备中心的宿主上（iOS、直接开静态文件的浏览器）只列当前这台，加「断开连接」一项。
 - 设备中心没有手动刷新的按钮：启动、从设备页返回、窗口重新可见时各拉一次，停在这一页期间每 5 秒轻拉一次；回包内容没变就不重画，所以列表不会自己跳。
 - 品牌芯片在同时能走 BLE 和 SPP 的宿主上出现（macOS、Android、由 `server.py` 提供的浏览器页面）；设备中心已经有设备时让位给设备列表。iPhone 上没有 SPP，所以那里连芯片都不显示，原因见下面的「iPhone 上怎么管华为耳机」。
 - 设备中心只在能枚举系统配对设备的宿主上出现（macOS、Android、由 `server.py` 提供的浏览器页面）。iOS 和直接开静态文件的浏览器上首页只有一个「连接」按钮。
+
+## 品牌标识
+
+设备中心卡片上的厂商词标原样内联在 `web/logos.js`，没有改形，只把填充统一换成 `currentColor`，深色底上随旁边文字渲染。Bose / HUAWEI / vivo / OPPO 是各家的商标，这里只用于识别设备品牌。
+
+| 品牌 | 来源 | 许可标注 |
+| --- | --- | --- |
+| Bose | bose.com 页头静态资源 `logo.svg`；[Commons 同形文件《Bose logo.svg》](https://commons.wikimedia.org/wiki/File:Bose_logo.svg) | Public domain |
+| HUAWEI | Commons [《Huawei wordmark 2019.svg》](https://commons.wikimedia.org/wiki/File:Huawei_wordmark_2019.svg) | Public domain |
+| vivo | Commons [《Vivo (China) logo.svg》](https://commons.wikimedia.org/wiki/File:Vivo_%28China%29_logo.svg) | Public domain |
+| OPPO | Commons [《OPPO LOGO 2019.svg》](https://commons.wikimedia.org/wiki/File:OPPO_LOGO_2019.svg) | Public domain |
 
 ## 电脑 Chrome
 
