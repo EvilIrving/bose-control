@@ -1,0 +1,9 @@
+{
+  "name": "js-bose-control",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/bmap.test.mjs",
+    "start": "python3 server.py"
+  }
+}

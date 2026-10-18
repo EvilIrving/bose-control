@@ -1,0 +1,23 @@
+.certs/
+
+# Node
+node_modules/
+
+# Android / Gradle
+.gradle/
+build/
+local.properties
+*.jks
+*.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+*.iml
+.idea/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store

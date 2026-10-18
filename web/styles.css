@@ -1,0 +1,199 @@
+:root {
+  color-scheme: dark;
+  --bg: #0b0b0b;
+  --fg: #f4f4f4;
+  --dim: #7a7a7a;
+  --line: #2a2a2a;
+  --fill: #171717;
+  --on: #0b0b0b;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+body {
+  min-height: 100dvh;
+  padding: 1rem 1rem 1.25rem;
+  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
+}
+
+header {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 1.25rem;
+}
+
+h1 {
+  margin: 0;
+  font-size: 1.35rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+}
+
+#meta {
+  margin: 0;
+  color: var(--dim);
+  font-variant-numeric: tabular-nums;
+  flex: 1;
+}
+
+#go {
+  margin-left: auto;
+}
+
+button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  padding: 0.55rem 1rem;
+  background: #f4f4f4;
+  color: var(--on);
+  font: inherit;
+  font-weight: 600;
+}
+
+button:disabled {
+  opacity: 0.35;
+}
+
+.chips,
+.levels,
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+
+.row {
+  align-items: center;
+}
+
+main > * + * {
+  margin-top: 1.1rem;
+}
+
+.chip,
+.levels button {
+  background: var(--fill);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  font-weight: 500;
+}
+
+.chip.on,
+.levels button.on {
+  background: #f4f4f4;
+  color: var(--on);
+  border-color: #f4f4f4;
+}
+
+.levels button {
+  min-width: 2.35rem;
+  padding: 0.55rem 0;
+}
+
+.band {
+  display: grid;
+  grid-template-columns: 3rem 1fr 2rem;
+  gap: 0.7rem;
+  align-items: center;
+  margin-top: 0.75rem;
+}
+
+.band:first-child {
+  margin-top: 0;
+}
+
+.track {
+  height: 2.6rem;
+  border-radius: 999px;
+  background: var(--fill);
+  border: 1px solid var(--line);
+  overflow: hidden;
+  touch-action: none;
+  cursor: pointer;
+}
+
+.track i {
+  display: block;
+  height: 100%;
+  background: #f4f4f4;
+  width: 0;
+  pointer-events: none;
+}
+
+.band b {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+@media (min-width: 900px) {
+  html,
+  body {
+    height: 100%;
+    overflow: hidden;
+  }
+
+  body {
+    height: 100dvh;
+    padding: 1.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+  }
+
+  h1 {
+    font-size: 1.7rem;
+  }
+
+  main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  main > * + * {
+    margin-top: 0;
+  }
+
+  .levels {
+    flex-wrap: nowrap;
+  }
+
+  .levels button {
+    flex: 1;
+    min-width: 0;
+    padding: 0.75rem 0;
+    font-size: 1.05rem;
+  }
+
+  .chip {
+    font-size: 1.05rem;
+    padding: 0.7rem 1.15rem;
+  }
+
+  .track {
+    height: 3rem;
+  }
+
+  .band {
+    grid-template-columns: 3.2rem 1fr 2.2rem;
+  }
+}
