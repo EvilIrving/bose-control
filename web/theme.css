@@ -68,12 +68,33 @@ html:not([data-theme="shadcn"]) .chip.on:hover {
   background: var(--fg);
 }
 
-/* 经典版没有边框卡片，设备信息回到顶栏一行 */
+/* 经典版没有边框卡片，设备名和电量并成一行 */
 html:not([data-theme="shadcn"]) #device-trigger {
+  display: flex;
+  align-items: baseline;
+  gap: 0.45rem;
   border-color: transparent;
   background: transparent;
   padding-left: 0;
   padding-right: 0;
+}
+
+html:not([data-theme="shadcn"]) #status {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+html:not([data-theme="shadcn"]) #meta {
+  flex: none;
+  font-size: 0.85rem;
+}
+
+html:not([data-theme="shadcn"]) #device-trigger .chev {
+  margin-left: auto;
+  align-self: center;
 }
 
 /* 滑轨：经典版是整条白底，没有圆点，高度压薄一档 */
