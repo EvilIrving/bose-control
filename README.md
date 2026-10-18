@@ -1,5 +1,7 @@
 # bose-control
 
+[![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml)
+
 不登录、不联网，用蓝牙直接控制 Bose 耳机。
 
 官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，走 Bose 私有的 BMAP 协议改降噪、模式、均衡、侧音、双连这些设置，数据不出本机。
@@ -47,6 +49,8 @@ xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configurati
 权限：`BLUETOOTH_SCAN`、`BLUETOOTH_CONNECT`（12+）。Release 已开 `minifyEnabled` / `shrinkResources`。
 
 本机没有 Android SDK 时用 Android Studio 打开 `android/` 再 Assemble Release。
+
+不想装 Android SDK 也行：[Actions](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) 每次 push 都会在 Ubuntu 上打一个 debug APK，从运行记录的 Artifacts 里下。打 `v*` 标签时会把 APK 附到 Release 上。
 
 ### 连不上时看什么
 
