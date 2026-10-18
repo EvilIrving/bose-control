@@ -56,7 +56,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 980, height: 900))
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor.black.cgColor
+        view.layer?.backgroundColor = NSColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1).cgColor
     }
 
     override func viewDidLoad() {
@@ -66,7 +66,6 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             uc.add(self, name: name)
         }
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
-        uc.addUserScript(WKUserScript(source: hideScrollCSS, injectionTime: .atDocumentStart, forMainFrameOnly: false))
         let conf = WKWebViewConfiguration()
         conf.userContentController = uc
         conf.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -86,18 +85,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         if #available(macOS 13.3, *) { web.isInspectable = true }
         #endif
         view.addSubview(web)
-        hideScrollers(web)
         bmap.delegate = self
         web.load(URLRequest(url: URL(string: startURL)!))
-    }
-
-    override func viewDidLayout() {
-        super.viewDidLayout()
-        hideScrollers(web)
-    }
-
-    func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-        hideScrollers(webView)
     }
 
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -129,36 +118,12 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         js("onDataReceived('\(hex)')")
     }
 
-    private func hideScrollers(_ view: NSView?) {
-        guard let view else { return }
-        if let scroll = view as? NSScrollView {
-            scroll.hasVerticalScroller = false
-            scroll.hasHorizontalScroller = false
-            scroll.autohidesScrollers = true
-            scroll.scrollerStyle = .overlay
-            scroll.verticalScrollElasticity = .none
-            scroll.horizontalScrollElasticity = .none
-        }
-        if let scroller = view as? NSScroller {
-            scroller.isHidden = true
-            scroller.alphaValue = 0
-        }
-        view.subviews.forEach { hideScrollers($0) }
-    }
-
     private let nativeBridgeJS = """
     window.NativeBLE = {
       bleScan: function () { window.webkit.messageHandlers.bleScan.postMessage({}); },
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
       bleDisconnect: function () { window.webkit.messageHandlers.bleDisconnect.postMessage({}); }
     };
-    """
-
-    private let hideScrollCSS = """
-    document.documentElement.style.scrollbarWidth = 'none';
-    var s = document.createElement('style');
-    s.textContent = 'html,body,main,*{scrollbar-width:none!important;-ms-overflow-style:none!important}::-webkit-scrollbar{display:none!important;width:0!important;height:0!important}';
-    document.documentElement.appendChild(s);
     """
 
     private func escape(_ text: String) -> String {

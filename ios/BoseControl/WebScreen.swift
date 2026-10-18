@@ -72,11 +72,11 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         web.navigationDelegate = self
         web.isOpaque = false
-        web.backgroundColor = .black
-        web.underPageBackgroundColor = .black
+        web.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
+        web.underPageBackgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
         web.allowsLinkPreview = false
         web.allowsBackForwardNavigationGestures = false
-        web.scrollView.backgroundColor = .black
+        web.scrollView.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.contentInset = .zero
         web.scrollView.delaysContentTouches = false
