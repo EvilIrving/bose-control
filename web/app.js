@@ -49,7 +49,7 @@ import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
 import { setUnverified, unverifiedOn } from "./experimental.js";
 import { chip, chips, fillRows, pane } from "./ui.js";
-import { linkOf, linkText } from "./link.js";
+import { batteryText, linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
 import {
   LANG_NAMES,
@@ -110,7 +110,6 @@ const ui = {
   back: $("back"),
   devicesTitle: $("devices-title"),
   goList: $("go-list"),
-  hubRefresh: $("hub-refresh"),
   goListText: $("go-list-text"),
 };
 
@@ -155,6 +154,9 @@ const state = {
   autoPlay: null,
   busy: false,
   link: "idle",
+  // 每台耳机上一次读到的电量：回到设备中心、换台设备再回来都还看得见。
+  // 只在本次运行里有效，没读过的不写，不编数字。
+  levels: {},
 };
 
 // 设置页「诊断」里能直接看到的东西：页面里报错往往只进 console.debug，
@@ -183,8 +185,6 @@ function applyLabels() {
   ui.back.setAttribute("aria-label", t("back"));
   ui.deviceTrigger.setAttribute("aria-label", t("switchDevice"));
   ui.deviceMenu.setAttribute("aria-label", t("switchDevice"));
-  ui.hubRefresh.setAttribute("aria-label", t("refresh"));
-  ui.hubRefresh.title = t("refresh");
   ui.back.title = t("back");
 }
 
@@ -280,11 +280,8 @@ function backToDevices() {
     return;
   }
   setPage("devices");
-  try {
-    nativeCall("listDevices");
-  } catch {
-    /* 没有设备中心就停在原地 */
-  }
+  // 原生设备中心和本机串口桥走同一条刷新路径（桥这条以前漏了）
+  refreshPeers();
 }
 
 // 「连上了」= 通道开着，而且这一台真的回过包（state.link 只有 session.load() 成功才变 ready）。
@@ -308,6 +305,9 @@ function renderAll() {
 
 function paintAll() {
   const on = sessionLive();
+  const level = on ? batteryText(state.battery) : "";
+  // 先记账再画列表，不然方块上的电量会晚一帧
+  if (on && state.selected && level) state.levels[state.selected] = level;
   const page = state.page === "device" ? "device" : "devices";
   setPage(page);
   renderBrand();
@@ -332,7 +332,7 @@ function paintAll() {
     return;
   }
   ui.status.textContent = state.name || link.name || "";
-  ui.meta.textContent = brandLabelOf(state.name || link.name);
+  ui.meta.textContent = level;
   if (deviceMenu.isOpen()) renderDeviceMenu();
   renderInfo();
   session?.render?.();
@@ -350,17 +350,19 @@ async function loadPeers() {
     try {
       nativeCall("listDevices");
     } catch {
-      /* 老版本桥没有这个方法 */
+      /* 老版本桥没有这个方法，也没有设备中心可刷新 */
+      peerPending = false;
     }
     return;
   }
   if (!bridgeAvailable()) return;
-  onDeviceList(JSON.stringify(await LocalBridge.list()));
-}
-
-// 列表里只写「已连接 / 未连接」，电量这类细节留在设备页
-function brandLabelOf(name) {
-  return brandById(brandForName(name)?.id ?? getBrand())?.label ?? "";
+  try {
+    onDeviceList(JSON.stringify(await LocalBridge.list()));
+  } catch (err) {
+    // 桥断了：这一条回不来，别把后面的自动刷新一起卡死
+    peerPending = false;
+    log(`设备列表拿不到：${err.message}`);
+  }
 }
 
 function renderHub() {
@@ -375,21 +377,41 @@ function renderHub() {
     card.type = "button";
     card.className = "peer-card";
 
+    const live = sessionLive() && state.selected === peer.address;
+    // 绿点连着、灰点没连；文字只留在 title / aria-label 里，不再占一行
+    const on = live || peer.connected;
+    const status = t(on ? "connected" : "notConnected");
+
+    const head = document.createElement("div");
+    head.className = "peer-head";
+
     const name = document.createElement("span");
     name.className = "peer-name";
     name.textContent = peer.name || peer.address;
 
-    const meta = document.createElement("b");
-    const live = sessionLive() && state.selected === peer.address;
-    // App 自己的会话优先：系统链路还在、会话已经没了的时候，不要报「已连接」
-    meta.textContent = live || peer.connected ? t("connected") : t("notConnected");
-
     const tag = document.createElement("i");
+    tag.className = "peer-brand";
     tag.textContent = brandById(peer.brand)?.label ?? peer.brand;
+
+    const dot = document.createElement("span");
+    dot.className = on ? "dot on" : "dot";
+    dot.title = status;
+    dot.setAttribute("aria-label", status);
+
+    head.append(name, tag, dot);
+    card.append(head);
+
+    // 电量：读过的那台都有，没读过就空着，不编数字
+    const level = state.levels[peer.address] ?? "";
+    if (level) {
+      const levels = document.createElement("b");
+      levels.className = "peer-levels";
+      levels.textContent = level;
+      card.append(levels);
+    }
 
     if (live) card.classList.add("active");
 
-    card.append(name, tag, meta);
     card.addEventListener("click", () => {
       if (sessionLive() && state.selected === peer.address) {
         setPage("device");
@@ -403,7 +425,11 @@ function renderHub() {
 
 }
 
+// 上一次设备列表的内容签名：一样的回包不再重画
+let peersSig = null;
+
 window.onDeviceList = (json) => {
+  peerPending = false;
   let rows = [];
   try {
     rows = JSON.parse(json);
@@ -414,6 +440,12 @@ window.onDeviceList = (json) => {
   state.peers = rows
     .map((peer) => ({ ...peer, brand: brandForName(peer.name)?.id }))
     .filter((peer) => peer.brand);
+  // 轮询里大部分回包一模一样，内容没变就不重画：重画会把手指底下的方块换掉
+  const sig = state.peers
+    .map((peer) => [peer.name ?? "", peer.address ?? "", peer.brand ?? "", Boolean(peer.connected)].join("\u0000"))
+    .join("\n");
+  if (sig === peersSig) return;
+  peersSig = sig;
   renderAll();
 };
 
@@ -499,9 +531,36 @@ function disconnect() {
   refreshPeers();
 }
 
+// 设备中心不靠手动刷新：启动、回到这一页、窗口重新可见、打开设备下拉时各拉一次，
+// 停在这一页期间每 5 秒再轻拉一次。上一条还没回就不发下一条——Android 没给权限时
+// 那条会停在系统弹窗上，轮询会把弹窗叠起来；回包内容没变也不重画，免得把手底下的方块换掉。
+const PEER_POLL_MS = 5000;
+let peerPending = false;
+
 function refreshPeers() {
+  if (!hubReady()) return;
+  peerPending = true;
   loadPeers();
 }
+
+function autoRefreshPeers() {
+  if (peerPending) return;
+  refreshPeers();
+}
+
+function peersOnScreen() {
+  return hubReady() && state.page === "devices" && document.visibilityState !== "hidden";
+}
+
+setInterval(() => {
+  if (peersOnScreen()) autoRefreshPeers();
+}, PEER_POLL_MS);
+
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) autoRefreshPeers();
+});
+
+window.addEventListener("focus", autoRefreshPeers);
 
 // 顶栏下拉：正在连的那台打勾，选别的直接换过去
 const deviceMenu = createMenu({
@@ -541,11 +600,8 @@ function renderDeviceMenu() {
       disabled: true,
     });
   }
-  if (hubReady() && (state.peers ?? []).length) {
-    items.push({ key: "refresh", label: t("refresh"), separator: true, run: refreshPeers });
-  }
   if (sessionLive()) {
-    items.push({ key: "disconnect", label: t("disconnect"), danger: true, run: disconnect });
+    items.push({ key: "disconnect", label: t("disconnect"), separator: true, danger: true, run: disconnect });
   }
   deviceMenu.setItems(items);
 }
@@ -557,8 +613,6 @@ ui.go.addEventListener("click", () => {
 });
 
 ui.back.addEventListener("click", backToDevices);
-
-ui.hubRefresh.addEventListener("click", refreshPeers);
 
 ui.goList.addEventListener("click", () => connect());
 
@@ -587,6 +641,7 @@ link.onDisconnected = () => {
   if (state.link === "ready") state.link = "lost";
   setPage("devices");
   renderAll();
+  refreshPeers();
 };
 
 applyLabels();
@@ -598,7 +653,7 @@ if (!navigator.bluetooth && !hasNative()) {
 renderAll();
 if (hasNative()) {
   if (hubReady()) {
-    nativeCall("listDevices");
+    refreshPeers();
   } else {
     connect();
   }

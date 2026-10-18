@@ -59,3 +59,16 @@ export function linkText(link) {
   return item[getLang()] ?? item.zh;
 }
 
+// 顶栏那一小串电量：一条读数就只写百分比，多段才带 L / R / C
+function batteryLabel(component, three) {
+  const zh = getLang() === "zh";
+  if (three) return component === 1 ? (zh ? "盒" : "Case") : component === 0 ? (zh ? "左" : "L") : zh ? "右" : "R";
+  return component === 0 ? (zh ? "左" : "L") : component === 1 ? (zh ? "右" : "R") : zh ? "电" : "Battery";
+}
+
+export function batteryText(rows) {
+  if (!rows?.length) return "";
+  if (rows.length === 1) return `${rows[0].level}%`;
+  const three = rows.length >= 3;
+  return rows.map((row) => `${batteryLabel(row.component, three)} ${row.level}%`).join(" · ");
+}

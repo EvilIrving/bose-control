@@ -54,6 +54,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     private var web: WKWebView!
     private var assets: WebBundleHandler?
     private let bmap = BmapClient()
+    // 上一次发给页面的设备列表，用来把轮询里没变化的日志压掉
+    private var lastDeviceList = ""
 
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 980, height: 900))
@@ -129,7 +131,11 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             bmap.disconnect()
         case "listDevices":
             let payload = HeadsetCatalog.json()
-            Diag.log("js listDevices → \(payload)")
+            // 页面自己轮询这一条（设备中心停留期间每 5 秒一次），只有内容变了才记一行
+            if payload != lastDeviceList {
+                lastDeviceList = payload
+                Diag.log("js listDevices → \(payload)")
+            }
             js("onDeviceList('\(escape(payload))')")
         case "setBrand":
             if let id = message.body as? String {
