@@ -277,6 +277,22 @@ section h2 {
   text-align: right;
 }
 
+#brand {
+  justify-content: center;
+}
+
+.gesture + .gesture {
+  margin-top: 0.85rem;
+}
+
+.gesture b {
+  display: block;
+  margin-bottom: 0.35rem;
+  color: var(--dim);
+  font-size: 0.85rem;
+  font-weight: 500;
+}
+
 .chev {
   flex: none;
   width: 0.5rem;

@@ -1,38 +1,25 @@
-import { createReassembler, decodeAll, keyOf, segment } from "./bmap.js";
 import { fromHex, hasNative, nativeCall, toHex } from "./native.js";
 
-export const BMAP_SERVICE = "0000febe-0000-1000-8000-00805f9b34fb";
-export const BMAP_SERVICE_APK = "0000febe-0000-0000-0000-000000000000";
-export const CHAR_SECURE = "c65b8f2f-aee2-4c89-b758-bc4892d6f2d8";
-export const CHAR_PLAIN = "d417c028-9818-4354-99d1-2ac09d074591";
-
-const SERVICES = [BMAP_SERVICE, BMAP_SERVICE_APK];
-
-const NAME_FILTERS = [
-  { namePrefix: "Bose" },
-  { namePrefix: "LE-Bose" },
-  { namePrefix: "LE-QC" },
-  { namePrefix: "QC" },
-  { namePrefix: "QuietComfort" },
-  { namePrefix: "SoundLink" },
-  { services: [BMAP_SERVICE] },
-  { services: [BMAP_SERVICE_APK] },
-];
-
-export class BoseBle {
-  constructor() {
+// 只管「把字节送出去、把回包收回来」，具体怎么切包、怎么认出同一命令由 codec 决定：
+//   { id, filters, services, reset(), chunks(bytes, link), parse(chunk, link), key(packet), header(bytes) }
+export class HeadsetLink {
+  constructor(codec) {
+    this.codec = codec;
     this.device = null;
     this.server = null;
     this.char = null;
     this.link = "ble";
     this.nativeOn = false;
-    this.reassembler = createReassembler();
     this.pending = new Map();
     this.onPacket = null;
     this.onDisconnected = null;
     this.lastError = "";
     this._gate = Promise.resolve();
     this._bindNative();
+  }
+
+  use(codec) {
+    this.codec = codec;
   }
 
   get connected() {
@@ -46,18 +33,13 @@ export class BoseBle {
 
   _bindNative() {
     window.onDataReceived = (hex) => {
-      const bytes = fromHex(String(hex));
-      if (this.link === "spp") {
-        this.handleNotify(bytes, true);
-      } else {
-        this.handleNotify(bytes, false);
-      }
+      this.handleNotify(fromHex(String(hex)));
     };
     window.onNativeConnected = (info) => {
       const data = typeof info === "string" ? JSON.parse(info || "{}") : info || {};
       this.nativeOn = true;
       this.link = data.link === "spp" ? "spp" : "ble";
-      this.device = { name: data.name || "Bose" };
+      this.device = { name: data.name || "" };
       this._connectWait?.resolve();
       this._connectWait = null;
     };
@@ -78,8 +60,8 @@ export class BoseBle {
   }
 
   async connect({ acceptAll = false } = {}) {
+    this.codec.reset?.();
     if (hasNative()) {
-      this.reassembler = createReassembler();
       this.lastError = "";
       await new Promise((resolve, reject) => {
         // 原生端可能永远不回包（权限弹窗被系统吞掉、扫描被拦），超时就得放行重试
@@ -105,7 +87,9 @@ export class BoseBle {
           },
         };
         try {
-          nativeCall("bleScan");
+          // 只有非默认品牌才把品牌传给原生端，老桥不认参数就不会被调到
+          if (this.codec.id === "bose") nativeCall("bleScan");
+          else nativeCall("bleScan", { brand: this.codec.id });
         } catch (err) {
           this._connectWait = null;
           clearTimeout(timer);
@@ -114,12 +98,13 @@ export class BoseBle {
       });
       return;
     }
+    if (!this.codec.ble) throw new Error("这里连不了：" + this.codec.id);
     if (!navigator.bluetooth) {
       throw new Error("当前浏览器没有 Web Bluetooth。请用 Android Chrome。");
     }
     const options = acceptAll
-      ? { acceptAllDevices: true, optionalServices: SERVICES }
-      : { filters: NAME_FILTERS, optionalServices: SERVICES };
+      ? { acceptAllDevices: true, optionalServices: this.codec.services }
+      : { filters: this.codec.filters, optionalServices: this.codec.services };
     const device = await navigator.bluetooth.requestDevice(options);
     device.addEventListener("gattserverdisconnected", () => {
       this.char = null;
@@ -140,19 +125,25 @@ export class BoseBle {
   }
 
   async openService(server) {
-    try {
-      return await server.getPrimaryService(BMAP_SERVICE_APK);
-    } catch {
-      return await server.getPrimaryService(BMAP_SERVICE);
+    for (const uuid of this.codec.services) {
+      try {
+        return await server.getPrimaryService(uuid);
+      } catch {
+        /* 试下一个 */
+      }
     }
+    throw new Error("no service");
   }
 
   async openCharacteristic(service) {
-    try {
-      return await service.getCharacteristic(CHAR_SECURE);
-    } catch {
-      return await service.getCharacteristic(CHAR_PLAIN);
+    for (const uuid of this.codec.chars ?? []) {
+      try {
+        return await service.getCharacteristic(uuid);
+      } catch {
+        /* 试下一个 */
+      }
     }
+    throw new Error("no characteristic");
   }
 
   disconnect() {
@@ -174,22 +165,19 @@ export class BoseBle {
     this.server = null;
   }
 
-  handleNotify(chunk, raw = false) {
-    const assembled = raw ? chunk : this.reassembler.push(chunk);
-    if (!assembled) return;
-    const packets = decodeAll(assembled);
-    for (const packet of packets) {
+  handleNotify(chunk) {
+    for (const packet of this.codec.parse(chunk, this.link)) {
       this.onPacket?.(packet);
-      const waiters = this.pending.get(keyOf(packet));
+      const key = this.codec.key(packet);
+      const waiters = this.pending.get(key);
       if (!waiters?.length) continue;
-      if (packet.op === 7) continue;
       waiters.shift().resolve(packet);
-      if (!waiters.length) this.pending.delete(keyOf(packet));
+      if (!waiters.length) this.pending.delete(key);
     }
   }
 
   async write(packetBytes) {
-    const chunks = this.link === "spp" ? [packetBytes] : segment(packetBytes);
+    const chunks = this.codec.chunks(packetBytes, this.link);
     if (hasNative() && this.nativeOn) {
       for (const chunk of chunks) nativeCall("sendData", toHex(chunk));
       return;
@@ -216,9 +204,9 @@ export class BoseBle {
   }
 
   _requestOnce(packetBytes, timeoutMs) {
-    const header = decodeAll(packetBytes)[0];
+    const header = this.codec.header(packetBytes);
     if (!header) return Promise.reject(new Error("空数据包"));
-    const key = keyOf(header);
+    const key = this.codec.key(header);
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const list = this.pending.get(key) ?? [];

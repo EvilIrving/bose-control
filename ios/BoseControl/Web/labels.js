@@ -99,13 +99,115 @@ export const LABELS = {
 
   productName: { zh: "产品名称", en: "Product Name" },
   product: { zh: "产品变型", en: "Product Variant" },
+  model: { zh: "型号", en: "Model" },
   fw: { zh: "固件版本", en: "Firmware Version" },
   serial: { zh: "序列号", en: "Serial Number" },
   mac: { zh: "蓝牙 MAC 地址", en: "Bluetooth MAC Address" },
   made: { zh: "生产日期", en: "Date of Manufacture" },
   hardware: { zh: "硬件版本", en: "Hardware Revision" },
   originalName: { zh: "原始名称", en: "Original Name" },
+  leftSerial: { zh: "左耳序列号", en: "Left Serial" },
+  rightSerial: { zh: "右耳序列号", en: "Right Serial" },
+
+  brand: { zh: "品牌", en: "Brand" },
+  gestures: { zh: "手势", en: "Gestures" },
+  doubleTap: { zh: "双击", en: "Double Tap" },
+  tripleTap: { zh: "三击", en: "Triple Tap" },
+  longPress: { zh: "长按", en: "Long Press" },
+  swipe: { zh: "滑动", en: "Swipe" },
+  left: { zh: "左", en: "Left" },
+  right: { zh: "右", en: "Right" },
+  ancNormal: { zh: "正常", en: "Off" },
+  ancCancel: { zh: "降噪", en: "Cancelling" },
+  ancAware: { zh: "通透", en: "Awareness" },
+  dualConnect: { zh: "双连接", en: "Dual Connection" },
+  lowLatency: { zh: "低延迟", en: "Low Latency" },
+  autoPause: { zh: "摘下暂停", en: "Auto Pause" },
+  inEar: { zh: "佩戴", en: "In Ear" },
+  voiceLanguage: { zh: "语音语言", en: "Voice Language" },
+  soundQuality: { zh: "音质偏好", en: "Sound Quality" },
+  sqConnectivity: { zh: "连接优先", en: "Connection First" },
+  sqQuality: { zh: "音质优先", en: "Quality First" },
+  huaweiApp: { zh: "华为耳机要用 App", en: "Use the app for HUAWEI" },
+  stateOn: { zh: "已开启", en: "On" },
+  stateOff: { zh: "已关闭", en: "Off" },
 };
+
+// 华为耳机手势动作码，来自耳机自己上报的可用列表
+export const TAP_ACTIONS = {
+  "-1": { zh: "关闭", en: "Off" },
+  0: { zh: "语音助手", en: "Voice Assistant" },
+  1: { zh: "播放/暂停", en: "Play/Pause" },
+  2: { zh: "下一曲", en: "Next Track" },
+  7: { zh: "上一曲", en: "Previous Track" },
+  10: { zh: "噪声控制", en: "Noise Control" },
+  18: { zh: "音量 +", en: "Volume Up" },
+  19: { zh: "音量 -", en: "Volume Down" },
+};
+
+export const EQ_PRESETS = {
+  1: { zh: "默认", en: "Default" },
+  2: { zh: "低音增强", en: "Bass Boost" },
+  3: { zh: "高音增强", en: "Treble Boost" },
+  9: { zh: "人声", en: "Voice" },
+};
+
+const ANC_MODES = {
+  0: { zh: "正常", en: "Off" },
+  1: { zh: "降噪", en: "Cancelling" },
+  2: { zh: "通透", en: "Awareness" },
+};
+
+const LOCALES = {
+  "zh-CN": { zh: "中文", en: "Chinese" },
+  "zh-HK": { zh: "粤语", en: "Cantonese" },
+  "en-GB": { zh: "英语（英）", en: "English (UK)" },
+  "en-US": { zh: "英语（美）", en: "English (US)" },
+  "ja-JP": { zh: "日语", en: "Japanese" },
+  "ko-KR": { zh: "韩语", en: "Korean" },
+  "de-DE": { zh: "德语", en: "German" },
+  "fr-FR": { zh: "法语", en: "French" },
+  "es-ES": { zh: "西班牙语", en: "Spanish" },
+  "it-IT": { zh: "意大利语", en: "Italian" },
+  "pt-BR": { zh: "葡萄牙语（巴）", en: "Portuguese (BR)" },
+  "ru-RU": { zh: "俄语", en: "Russian" },
+};
+
+export function tapActionName(code) {
+  const item = TAP_ACTIONS[code];
+  return item ? item[lang] : lang === "zh" ? `动作 ${code}` : `Action ${code}`;
+}
+
+export function eqPresetName(id) {
+  const item = EQ_PRESETS[id];
+  return item ? item[lang] : lang === "zh" ? `预设 ${id}` : `Preset ${id}`;
+}
+
+export function ancModeName(mode) {
+  const item = ANC_MODES[mode];
+  return item ? item[lang] : String(mode);
+}
+
+export function sideName(side) {
+  return t(side === 2 ? "right" : "left");
+}
+
+// 滑动只有「音量调节 / 关闭」两种可选，0 和 1 都是音量
+const SWIPE_ACTIONS = {
+  "-1": { zh: "关闭", en: "Off" },
+  0: { zh: "音量调节", en: "Volume" },
+  1: { zh: "音量调节", en: "Volume" },
+};
+
+export function swipeActionName(code) {
+  const item = SWIPE_ACTIONS[code];
+  return item ? item[lang] : lang === "zh" ? `动作 ${code}` : `Action ${code}`;
+}
+
+export function voiceLocaleName(code) {
+  const item = LOCALES[code];
+  return item ? item[lang] : code;
+}
 
 export const SPATIAL_OPTIONS = [
   { zh: "关闭", en: "Off" },

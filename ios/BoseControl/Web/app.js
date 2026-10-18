@@ -42,7 +42,11 @@ import {
   sidetonePayload,
   start,
 } from "./bmap.js";
-import { BoseBle } from "./ble.js";
+import { HeadsetLink } from "./transport.js";
+import { createBoseCodec } from "./bose.js";
+import { HuaweiHeadset, createHuaweiCodec } from "./huawei.js";
+import { BRANDS, brandsHere, getBrand, setBrand } from "./brand.js";
+import { chip, chips, fillRows, pane } from "./ui.js";
 import { batteryText, linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
 import {
@@ -61,7 +65,8 @@ import {
 } from "./labels.js";
 import { hasNative } from "./native.js";
 
-const ble = new BoseBle();
+const link = new HeadsetLink(createBoseCodec());
+const huaweiCodec = createHuaweiCodec();
 const $ = (id) => document.getElementById(id);
 const ui = {
   status: $("status"),
@@ -94,6 +99,7 @@ const ui = {
   favorites: $("favorites"),
   devices: $("devices"),
   headset: $("headset-actions"),
+  brand: $("brand"),
 };
 
 const MODE_ZH = {
@@ -148,6 +154,9 @@ function log(line) {
   console.debug(line);
 }
 
+const isHuawei = () => getBrand() === "huawei";
+const huawei = new HuaweiHeadset({ link, ui, state, refresh: () => renderAll(), log });
+
 function modeLabel(mode) {
   const raw = (mode.name || "").trim();
   return MODE_ZH[raw] || raw;
@@ -167,7 +176,7 @@ function freeSlot() {
 }
 
 async function ask(packet, label, timeoutMs) {
-  const reply = await ble.request(packet, timeoutMs ?? 2500);
+  const reply = await link.request(packet, timeoutMs ?? 2500);
   if (reply.op === OP.ERROR) {
     const code = reply.payload[0] ?? reply.payload[1] ?? "?";
     throw new Error(`${label} ${code}`);
@@ -200,7 +209,7 @@ async function probe(packet, label, timeoutMs = 800) {
 
 async function supported(packet, label, timeoutMs = 700) {
   try {
-    await ble.request(packet, timeoutMs);
+    await link.request(packet, timeoutMs);
     return true;
   } catch {
     return false;
@@ -215,44 +224,9 @@ async function writeAsk(packet, label) {
   return null;
 }
 
-function pane(el, on) {
-  const box = el.closest("section") ?? el;
-  box.hidden = !on;
-}
 
-function chip(label, on) {
-  const btn = document.createElement("button");
-  btn.type = "button";
-  btn.className = "chip" + (on ? " on" : "");
-  btn.textContent = label;
-  return btn;
-}
 
-function chips(root, items, selected, onPick) {
-  const on = (key) => (Array.isArray(selected) ? selected.includes(key) : key === selected);
-  root.innerHTML = "";
-  items.forEach((item, index) => {
-    const label = typeof item === "string" ? item : item.label;
-    const key = typeof item === "string" ? index : item.key;
-    const btn = chip(label, on(key));
-    btn.addEventListener("click", () => onPick(key));
-    root.appendChild(btn);
-  });
-}
 
-function fillRows(root, rows) {
-  root.innerHTML = "";
-  for (const [key, value, title] of rows) {
-    const line = document.createElement("div");
-    const label = document.createElement("span");
-    label.textContent = key;
-    const bold = document.createElement("b");
-    bold.textContent = value;
-    if (title) bold.title = title;
-    line.append(label, bold);
-    root.appendChild(line);
-  }
-}
 
 function shortVersion(version) {
   return version ? String(version).split("+")[0] : "";
@@ -270,6 +244,8 @@ function renderInfo() {
     [t("product"), state.info.product],
     [t("fw"), shortVersion(state.info.firmware), state.info.firmware],
     [t("serial"), state.info.serial],
+    [t("leftSerial"), state.info.leftSerial],
+    [t("rightSerial"), state.info.rightSerial],
     [t("mac"), state.info.mac],
     [t("made"), state.info.made],
     [t("hardware"), state.info.hardware],
@@ -564,6 +540,10 @@ function renderLanguage() {
 
 function renderSettings() {
   renderLanguage();
+  if (isHuawei()) {
+    huawei.renderSettings();
+    return;
+  }
   renderRename();
   renderShortcut();
   renderFavorites();
@@ -598,7 +578,7 @@ function renderDiag() {
   if (env && typeof env.loc !== "undefined") {
     rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
   }
-  rows.push([t("lastError"), ble.lastError || "—"]);
+  rows.push([t("lastError"), link.lastError || "—"]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
   fillRows(ui.diag, rows);
 }
@@ -615,7 +595,8 @@ function renderStandby() {
 }
 
 function renderAll() {
-  const on = ble.connected;
+  renderBrand();
+  const on = link.connected;
   const idle = !on;
   document.body.classList.toggle("idle", idle);
   ui.controls.hidden = !on;
@@ -628,9 +609,13 @@ function renderAll() {
     ui.meta.textContent = "";
     return;
   }
-  ui.status.textContent = state.name || ble.name || "";
+  ui.status.textContent = state.name || link.name || "";
   ui.meta.textContent = batteryText(state.battery);
   renderInfo();
+  if (isHuawei()) {
+    huawei.render();
+    return;
+  }
   renderModes();
   renderCnc();
   renderEq();
@@ -640,6 +625,23 @@ function renderAll() {
   renderToggles();
   renderTransport();
   renderSettings();
+}
+
+// 品牌只在没连上时可选：连的是哪一家，决定了后面所有命令走哪套协议
+function renderBrand() {
+  const list = brandsHere();
+  ui.brand.hidden = list.length < 2 || link.connected || state.busy;
+  if (ui.brand.hidden) return;
+  chips(
+    ui.brand,
+    list.map((id) => ({ key: id, label: BRANDS[id].label })),
+    getBrand(),
+    (id) => {
+      setBrand(id);
+      state.link = "idle";
+      renderAll();
+    },
+  );
 }
 
 async function loadDevice() {
@@ -679,7 +681,7 @@ async function loadDevice() {
   if (hardwareReply) state.info.hardware = parseFirmware(hardwareReply.payload);
 
   const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", 1200);
-  if (nameReply) state.name = parseName(nameReply.payload) || ble.name;
+  if (nameReply) state.name = parseName(nameReply.payload) || link.name;
 
   const batReply = await readInfo(get(FBLOCK.STATUS, FUNC.BATTERY), "电量");
   if (batReply) state.battery = parseBattery(batReply.payload);
@@ -1163,12 +1165,17 @@ function hasBmapData() {
 }
 
 function resetDevice() {
+  huawei.reset();
+  state.name = "";
+  state.battery = [];
+  state.eq = [];
+  state.cnc = null;
   state.modesAll = [];
   state.favorites = null;
   state.shortcut = null;
   state.devices = [];
   state.hasTransport = false;
-  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  state.info = { product: "", productName: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
   closeEditor();
 }
 
@@ -1178,15 +1185,27 @@ async function connect() {
   state.link = "idle";
   resetDevice();
   renderAll();
+  const brand = getBrand();
+  link.use(brand === "huawei" ? huaweiCodec : createBoseCodec());
+  link.onPacket = brand === "huawei" ? (packet) => huawei.onPacket(packet) : null;
   try {
-    await ble.connect({ acceptAll: false });
-    ui.status.textContent = ble.name || "";
-    await loadDevice();
-    if (hasBmapData()) {
-      state.link = "ready";
+    await link.connect({ acceptAll: false });
+    ui.status.textContent = link.name || "";
+    if (brand === "huawei") {
+      if (await huawei.load()) {
+        state.link = "ready";
+      } else {
+        state.link = "noproto";
+        link.disconnect();
+      }
     } else {
-      state.link = "noproto";
-      ble.disconnect();
+      await loadDevice();
+      if (hasBmapData()) {
+        state.link = "ready";
+      } else {
+        state.link = "noproto";
+        link.disconnect();
+      }
     }
   } catch (err) {
     log(err.message);
@@ -1198,9 +1217,9 @@ async function connect() {
 
 ui.go.addEventListener("click", () => {
   if (state.busy) return;
-  if (ble.connected) {
+  if (link.connected) {
     state.link = "idle";
-    ble.disconnect();
+    link.disconnect();
     renderAll();
     return;
   }
@@ -1220,7 +1239,7 @@ ui.deviceToggle.addEventListener("click", () => {
   setInfo(ui.deviceToggle.getAttribute("aria-expanded") !== "true");
 });
 
-ble.onDisconnected = () => {
+link.onDisconnected = () => {
   state.busy = false;
   resetDevice();
   setInfo(false);

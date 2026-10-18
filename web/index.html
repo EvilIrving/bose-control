@@ -36,6 +36,13 @@
           hint("系统 WebView 太旧，请升级（Chromium " + chrome + "）");
           return;
         }
+        // app.js 用了可选链等新语法，Chromium 80 以下会在解析阶段就挂掉
+        try {
+          new Function("return a?.b ?? c");
+        } catch (err) {
+          hint("系统 WebView 太旧，请升级（Chromium " + chrome + "）");
+          return;
+        }
         document.addEventListener(
           "click",
           (e) => {
@@ -63,6 +70,7 @@
         <span id="go-text">连接</span>
         <i class="spin" aria-hidden="true"></i>
       </button>
+      <div id="brand" class="chips" hidden></div>
       <p id="hint"></p>
     </header>
     <div id="info" hidden></div>
