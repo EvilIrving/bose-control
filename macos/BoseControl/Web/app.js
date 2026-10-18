@@ -2,16 +2,24 @@ import {
   FBLOCK,
   FUNC,
   OP,
+  TRANSPORT,
+  actionButtonPayload,
   audioSettingsPayload,
   cncPayload,
   eqPayload,
+  favoritesPayload,
   get,
+  modeConfigPayload,
   modeSwitchPayload,
+  namePayload,
+  parseActionButton,
   parseAudioSettings,
   parseBattery,
   parseCnc,
   parseConversation,
+  parseDeviceList,
   parseEq,
+  parseFavorites,
   parseFirmware,
   parseMacAddress,
   parseManufactured,
@@ -42,8 +50,11 @@ import {
   SPATIAL_OPTIONS,
   STANDBY_OPTIONS,
   SELF_VOICE_OPTIONS,
+  actionName,
+  eqBandName,
   getLang,
   pick,
+  pressName,
   setLang,
   t,
   voiceLanguageName,
@@ -72,8 +83,17 @@ const ui = {
   settings: $("settings"),
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
+  diag: $("diag"),
   toggles: $("toggles"),
   standby: $("standby"),
+  transport: $("transport"),
+  editor: $("mode-editor"),
+  rename: $("rename"),
+  shortcut: $("shortcut"),
+  shortcutTitle: $("shortcut-title"),
+  favorites: $("favorites"),
+  devices: $("devices"),
+  headset: $("headset-actions"),
 };
 
 const MODE_ZH = {
@@ -85,8 +105,13 @@ const MODE_ZH = {
 };
 
 const state = {
-  modes: [],
+  modesAll: [],
   currentMode: null,
+  favorites: null,
+  shortcut: null,
+  devices: [],
+  editing: null,
+  hasTransport: false,
   eq: [],
   cnc: null,
   cfg: { cnc: 5, auto: false, spatial: 0, wind: false, anc: true },
@@ -129,11 +154,16 @@ function modeLabel(mode) {
 }
 
 function usableModes() {
-  return state.modes.filter((mode) => {
-    const raw = (mode.name || "").trim();
-    if (!raw || /^none$/i.test(raw) || raw === "未命名") return false;
-    return true;
-  });
+  return state.modesAll.filter((mode) => (mode.configured || !mode.editable) && !isPlaceholder(mode));
+}
+
+function isPlaceholder(mode) {
+  const raw = (mode.name || "").trim();
+  return !raw || /^none$/i.test(raw) || raw === "未命名";
+}
+
+function freeSlot() {
+  return state.modesAll.find((mode) => mode.editable && (!mode.configured || isPlaceholder(mode)));
 }
 
 async function ask(packet, label, timeoutMs) {
@@ -168,20 +198,43 @@ async function probe(packet, label, timeoutMs = 800) {
   return tryAsk(packet, label, timeoutMs * 2);
 }
 
+async function supported(packet, label, timeoutMs = 700) {
+  try {
+    await ble.request(packet, timeoutMs);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function writeAsk(packet, label) {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const reply = await tryAsk(packet, label);
+    if (reply) return reply;
+  }
+  return null;
+}
+
 function pane(el, on) {
   const box = el.closest("section") ?? el;
   box.hidden = !on;
 }
 
+function chip(label, on) {
+  const btn = document.createElement("button");
+  btn.type = "button";
+  btn.className = "chip" + (on ? " on" : "");
+  btn.textContent = label;
+  return btn;
+}
+
 function chips(root, items, selected, onPick) {
+  const on = (key) => (Array.isArray(selected) ? selected.includes(key) : key === selected);
   root.innerHTML = "";
   items.forEach((item, index) => {
     const label = typeof item === "string" ? item : item.label;
     const key = typeof item === "string" ? index : item.key;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip" + (key === selected ? " on" : "");
-    btn.textContent = label;
+    const btn = chip(label, on(key));
     btn.addEventListener("click", () => onPick(key));
     root.appendChild(btn);
   });
@@ -233,14 +286,20 @@ function setInfo(open) {
 
 function renderModes() {
   const modes = usableModes();
-  pane(ui.modes, modes.length > 0);
+  const free = freeSlot();
+  pane(ui.modes, modes.length > 0 || Boolean(free));
   ui.modes.innerHTML = "";
   for (const mode of modes) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip" + (mode.index === state.currentMode ? " on" : "");
-    btn.textContent = modeLabel(mode);
-    btn.addEventListener("click", () => switchMode(mode.index));
+    const btn = chip(modeLabel(mode), mode.index === state.currentMode);
+    btn.addEventListener("click", () => {
+      if (mode.editable && mode.index === state.currentMode) openEditor(mode.index);
+      else switchMode(mode.index);
+    });
+    ui.modes.appendChild(btn);
+  }
+  if (free) {
+    const btn = chip(`＋ ${t("create")}`, false);
+    btn.addEventListener("click", () => openEditor(free.index));
     ui.modes.appendChild(btn);
   }
 }
@@ -320,7 +379,7 @@ function bandRow(band) {
   const row = document.createElement("div");
   row.className = "band";
   const name = document.createElement("span");
-  name.textContent = band.name;
+  name.textContent = eqBandName(band.id);
   row.appendChild(name);
   slider(row, {
     min: band.min,
@@ -328,7 +387,7 @@ function bandRow(band) {
     value: band.current,
     onChange: (value) => {
       band.current = value;
-      tryAsk(setGet(FBLOCK.SETTINGS, FUNC.EQ, eqPayload(value, band.id)), band.name);
+      tryAsk(setGet(FBLOCK.SETTINGS, FUNC.EQ, eqPayload(value, band.id)), eqBandName(band.id));
     },
   });
   return row;
@@ -375,20 +434,17 @@ function renderVoice() {
 }
 
 function renderToggles() {
-  ui.toggles.innerHTML = "";
   const items = [
     { key: "wind", label: t("wind"), on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
     { key: "mp", label: t("multipoint"), on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
     { key: "talk", label: t("conversation"), on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
   ];
   let n = 0;
+  ui.toggles.innerHTML = "";
   for (const item of items) {
     if (item.show === false) continue;
     n += 1;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip" + (item.on ? " on" : "");
-    btn.textContent = item.label;
+    const btn = chip(item.label, item.on);
     btn.addEventListener("click", item.run);
     ui.toggles.appendChild(btn);
   }
@@ -406,14 +462,95 @@ function renderBehaviour() {
   for (const item of items) {
     if (item.show === false) continue;
     n += 1;
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip" + (item.on ? " on" : "");
-    btn.textContent = item.label;
+    const btn = chip(item.label, item.on);
     btn.addEventListener("click", item.run);
     ui.behaviour.appendChild(btn);
   }
   pane(ui.behaviour, n > 0);
+}
+
+function renderTransport() {
+  pane(ui.transport, state.hasTransport);
+  if (!state.hasTransport) return;
+  chips(
+    ui.transport,
+    [
+      { key: "prev", label: t("prev") },
+      { key: "play", label: t("play") },
+      { key: "pause", label: t("pause") },
+      { key: "next", label: t("next") },
+    ],
+    null,
+    (key) => tryAsk(start(FBLOCK.AUDIO, FUNC.TRANSPORT, Uint8Array.of(TRANSPORT[key])), "播放"),
+  );
+}
+
+function renderFavorites() {
+  const modes = usableModes();
+  const favorites = state.favorites;
+  pane(ui.favorites, Boolean(favorites && modes.length));
+  if (!favorites || !modes.length) return;
+  chips(
+    ui.favorites,
+    modes.map((mode) => ({ key: mode.index, label: modeLabel(mode) })),
+    favorites.indices,
+    toggleFavorite,
+  );
+}
+
+function renderShortcut() {
+  const config = state.shortcut;
+  pane(ui.shortcut, Boolean(config && config.supported.length));
+  ui.shortcutTitle.textContent = config
+    ? `${t("shortcut")} · ${pressName(config.eventType)}`
+    : t("shortcut");
+  if (!config || !config.supported.length) return;
+  chips(
+    ui.shortcut,
+    config.supported.map((id) => ({ key: id, label: actionName(id) })),
+    config.action,
+    setShortcut,
+  );
+}
+
+function renderRename() {
+  pane(ui.rename, Boolean(state.name));
+  if (!state.name) return;
+  let input = ui.rename.querySelector("input");
+  if (!input) {
+    input = document.createElement("input");
+    input.type = "text";
+    input.className = "text";
+    input.maxLength = 30;
+    input.addEventListener("keydown", (ev) => {
+      if (ev.key === "Enter") saveName();
+    });
+    const save = chip(t("save"), false);
+    save.addEventListener("click", saveName);
+    ui.rename.append(input, save);
+  }
+  if (document.activeElement !== input) input.value = state.name;
+}
+
+function renderDevices() {
+  pane(ui.devices, state.devices.length > 0);
+  if (!state.devices.length) return;
+  fillRows(
+    ui.devices,
+    state.devices.map((device) => [device.mac, device.connected ? t("connected") : "—"]),
+  );
+}
+
+function renderHeadset() {
+  ui.headset.innerHTML = "";
+  const pair = chip(t("pair"), false);
+  armedClick(pair, () =>
+    tryAsk(start(FBLOCK.DEVICE, FUNC.PAIRING, Uint8Array.of(1)), "配对"),
+  );
+  const off = chip(t("powerOff"), false);
+  armedClick(off, () => tryAsk(start(FBLOCK.CONTROL, FUNC.POWER, Uint8Array.of(0)), "关机"));
+  ui.headset.append(pair, off);
+  pane(ui.headset, true);
 }
 
 function renderLanguage() {
@@ -421,14 +558,46 @@ function renderLanguage() {
     setLang(id);
     applyLabels();
     renderAll();
+    renderEditor();
   });
 }
 
 function renderSettings() {
   renderLanguage();
+  renderRename();
+  renderShortcut();
+  renderFavorites();
   renderVoice();
   renderBehaviour();
   renderStandby();
+  renderDevices();
+  renderHeadset();
+  renderDiag();
+}
+
+function nativeEnv() {
+  try {
+    if (window.NativeBLE && typeof window.NativeBLE.env === "function") {
+      return JSON.parse(window.NativeBLE.env());
+    }
+  } catch {
+    /* 老版本桥没有 env */
+  }
+  return null;
+}
+
+function renderDiag() {
+  const chrome = (String(navigator.userAgent).match(/Chrome\/(\d+)/) || [])[1] || "?";
+  const env = nativeEnv();
+  const bt = !env ? "—" : env.adapter === 1 ? t("btOn") : env.adapter === 2 ? t("btOff") : t("btNone");
+  const rows = [
+    ["WebView", `Chromium ${chrome}`],
+    [t("bridge"), hasNative() ? "OK" : "—"],
+    [t("btState"), bt],
+    [t("lastError"), ble.lastError || "—"],
+  ];
+  if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
+  fillRows(ui.diag, rows);
 }
 
 function renderStandby() {
@@ -466,6 +635,7 @@ function renderAll() {
   renderSidetone();
   renderVoice();
   renderToggles();
+  renderTransport();
   renderSettings();
 }
 
@@ -564,31 +734,45 @@ async function loadDevice() {
   const captouchReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控");
   if (captouchReply) state.captouch = parseFlag(captouchReply.payload);
 
+  const shortcutReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.BUTTONS), "快捷", 900);
+  if (shortcutReply) state.shortcut = parseActionButton(shortcutReply.payload);
+
+  const devicesReply = await tryAsk(get(FBLOCK.DEVICE, FUNC.DEVICE_LIST), "设备列表", 900);
+  if (devicesReply) state.devices = parseDeviceList(devicesReply.payload);
+
+  state.hasTransport = await supported(get(FBLOCK.AUDIO, FUNC.TRANSPORT), "播放");
+
   await loadModes();
   renderAll();
 }
 
 async function loadModes() {
-  state.modes = [];
+  state.modesAll = [];
+  state.favorites = null;
   const current = await tryAsk(get(FBLOCK.MODES, FUNC.CURRENT_MODE), "当前", 900);
   if (current?.payload.length) state.currentMode = current.payload[0];
-  const caps = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", 900);
-  const parsed = caps ? parseModeCaps(caps.payload) : null;
-  const n = Math.min(16, parsed ? parsed.bose + parsed.user || 8 : 8);
-  let miss = 0;
-  for (let i = 0; i < n; i++) {
-    const reply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(i)), `m${i}`, 900);
-    if (!reply) {
-      miss += 1;
-      if (miss >= 2) break;
-      continue;
-    }
-    miss = 0;
+  const capsReply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", 900);
+  const caps = capsReply ? parseModeCaps(capsReply.payload) : null;
+  const builtin = caps?.bose ?? 0;
+  const userReply = await tryAsk(get(FBLOCK.MODES, FUNC.USER_INDICES), "用户模式", 900);
+  const users = userReply?.payload.length
+    ? [...userReply.payload]
+    : Array.from({ length: caps?.user ?? 0 }, (_, i) => builtin + i);
+  const indices = [...new Set([...Array.from({ length: builtin }, (_, i) => i), ...users])];
+  if (!indices.length) indices.push(0, 1, 2, 3, 4, 5, 6, 7);
+  for (const index of indices) {
+    const reply = await tryAsk(
+      get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(index)),
+      `m${index}`,
+      900,
+    );
+    if (!reply) continue;
     const mode = parseModeConfig(reply.payload);
-    if (mode) state.modes.push(mode);
+    if (mode) state.modesAll.push(mode);
     renderModes();
   }
-  state.modes = usableModes();
+  const favoritesReply = await tryAsk(get(FBLOCK.MODES, FUNC.FAVORITES), "循环", 900);
+  if (favoritesReply) state.favorites = parseFavorites(favoritesReply.payload);
 }
 
 async function switchMode(index) {
@@ -597,12 +781,247 @@ async function switchMode(index) {
     "模式",
   );
   if (!reply) return;
+  if (state.editing && state.editing.index !== index) closeEditor();
   state.currentMode = index;
   renderModes();
 }
 
+function openEditor(index) {
+  const mode = state.modesAll.find((item) => item.index === index);
+  if (!mode) return;
+  const blank = isPlaceholder(mode);
+  state.editing = {
+    index,
+    isNew: blank && mode.editable,
+    prompt: blank ? [0, 0] : mode.prompt,
+    name: blank ? "" : mode.name,
+    cnc: blank ? state.cfg.cnc ?? 0 : mode.cnc ?? 0,
+    auto: Boolean(mode.auto),
+    spatial: mode.spatial ?? state.cfg.spatial ?? 0,
+    wind: Boolean(mode.wind),
+    anc: mode.anc !== false,
+    cycle: Boolean(state.favorites?.indices.includes(index)),
+  };
+  renderEditor();
+  ui.editor.scrollIntoView({ block: "nearest" });
+}
+
+function closeEditor() {
+  state.editing = null;
+  renderEditor();
+}
+
+function renderEditor() {
+  const edit = state.editing;
+  ui.editor.innerHTML = "";
+  ui.editor.hidden = !edit;
+  if (!edit) return;
+
+  const title = document.createElement("h2");
+  title.textContent = edit.isNew ? t("create") : t("edit");
+  ui.editor.appendChild(title);
+
+  const field = document.createElement("div");
+  field.className = "field";
+  const input = document.createElement("input");
+  input.type = "text";
+  input.className = "text";
+  input.maxLength = 30;
+  input.value = edit.name;
+  input.placeholder = t("modeName");
+  input.addEventListener("input", () => {
+    edit.name = input.value;
+  });
+  field.appendChild(input);
+  ui.editor.appendChild(field);
+
+  const band = document.createElement("div");
+  band.className = "band";
+  const label = document.createElement("span");
+  label.textContent = t("cnc");
+  band.appendChild(label);
+  slider(band, {
+    min: 0,
+    max: cncMax(),
+    value: Math.min(edit.cnc ?? 0, cncMax()),
+    onChange: (value) => {
+      edit.cnc = value;
+    },
+  });
+  ui.editor.appendChild(band);
+
+  const flags = document.createElement("div");
+  flags.className = "chips";
+  const flag = (key, on, run) => {
+    const btn = chip(t(key), on);
+    btn.addEventListener("click", () => {
+      run();
+      renderEditor();
+    });
+    flags.appendChild(btn);
+  };
+  flag("autoCnc", edit.auto, () => {
+    edit.auto = !edit.auto;
+  });
+  flag("wind", edit.wind, () => {
+    edit.wind = !edit.wind;
+  });
+  if (state.favorites) {
+    flag("cycle", edit.cycle, () => {
+      edit.cycle = !edit.cycle;
+    });
+  }
+  ui.editor.appendChild(flags);
+
+  if (state.hasAudioSettings) {
+    const spatial = document.createElement("div");
+    spatial.className = "chips";
+    SPATIAL_OPTIONS.forEach((option, optionIndex) => {
+      const btn = chip(pick(option), edit.spatial === optionIndex);
+      btn.addEventListener("click", () => {
+        edit.spatial = optionIndex;
+        renderEditor();
+      });
+      spatial.appendChild(btn);
+    });
+    ui.editor.appendChild(spatial);
+  }
+
+  const actions = document.createElement("div");
+  actions.className = "chips";
+  const save = chip(t("save"), false);
+  save.addEventListener("click", saveMode);
+  const cancel = chip(t("cancel"), false);
+  cancel.addEventListener("click", closeEditor);
+  actions.append(save, cancel);
+  if (!edit.isNew) {
+    const remove = chip(t("remove"), false);
+    armedClick(remove, removeMode);
+    actions.appendChild(remove);
+  }
+  ui.editor.appendChild(actions);
+}
+
+async function saveMode() {
+  const edit = state.editing;
+  if (!edit) return;
+  const name = edit.name.trim();
+  if (!name) return;
+  const reply = await writeAsk(
+    setGet(
+      FBLOCK.MODES,
+      FUNC.MODE_CONFIG,
+      modeConfigPayload({
+        index: edit.index,
+        prompt: edit.prompt,
+        name,
+        cnc: edit.cnc,
+        auto: edit.auto,
+        spatial: edit.spatial,
+        wind: edit.wind,
+        anc: edit.anc,
+      }),
+    ),
+    "模式",
+  );
+  if (!reply) return;
+  const saved = parseModeConfig(reply.payload);
+  if (!saved) return;
+  const slot = state.modesAll.findIndex((item) => item.index === edit.index);
+  if (slot >= 0) state.modesAll[slot] = saved;
+  else state.modesAll.push(saved);
+  const listed = Boolean(state.favorites?.indices.includes(edit.index));
+  if (edit.cycle !== listed) await writeFavorites(toggled(edit.index, edit.cycle));
+  closeEditor();
+  renderAll();
+  if (edit.isNew) await switchMode(edit.index);
+}
+
+async function removeMode() {
+  const edit = state.editing;
+  if (!edit) return;
+  const reply = await tryAsk(start(FBLOCK.MODES, FUNC.MODE_RESET, Uint8Array.of(edit.index)), "删除");
+  if (!reply) return;
+  if (state.favorites?.indices.includes(edit.index)) await writeFavorites(toggled(edit.index, false));
+  closeEditor();
+  await loadModes();
+  renderAll();
+}
+
+function toggled(index, on) {
+  const listed = state.favorites?.indices ?? [];
+  if (on) return listed.includes(index) ? listed : [...listed, index].sort((a, b) => a - b);
+  return listed.filter((item) => item !== index);
+}
+
+async function writeFavorites(indices) {
+  const count = state.favorites?.count ?? 0;
+  if (!count) return false;
+  const reply = await writeAsk(
+    setGet(FBLOCK.MODES, FUNC.FAVORITES, favoritesPayload(count, indices)),
+    "循环",
+  );
+  if (!reply) return false;
+  state.favorites = parseFavorites(reply.payload) ?? { count, indices };
+  return true;
+}
+
+async function toggleFavorite(index) {
+  if (!(await writeFavorites(toggled(index, !state.favorites?.indices.includes(index))))) return;
+  renderFavorites();
+}
+
+async function setShortcut(action) {
+  const config = state.shortcut;
+  if (!config) return;
+  const reply = await writeAsk(
+    setGet(FBLOCK.SETTINGS, FUNC.BUTTONS, actionButtonPayload(config, action)),
+    "快捷",
+  );
+  if (!reply) return;
+  state.shortcut = parseActionButton(reply.payload) ?? { ...config, action };
+  renderShortcut();
+}
+
+async function saveName() {
+  const input = ui.rename.querySelector("input");
+  if (!input) return;
+  const name = input.value.trim();
+  if (!name || name === state.name) return;
+  const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.NAME, namePayload(name)), "名称");
+  if (!reply) {
+    input.value = state.name;
+    return;
+  }
+  state.name = parseName(reply.payload) || name;
+  input.value = state.name;
+  renderAll();
+}
+
+function armedClick(btn, run) {
+  btn.addEventListener("click", () => {
+    if (btn.dataset.armed === "1") {
+      btn.dataset.armed = "";
+      btn.classList.remove("arm");
+      btn.textContent = btn.dataset.label;
+      run();
+      return;
+    }
+    btn.dataset.armed = "1";
+    btn.dataset.label = btn.textContent;
+    btn.classList.add("arm");
+    btn.textContent = t("again");
+    setTimeout(() => {
+      if (btn.dataset.armed !== "1") return;
+      btn.dataset.armed = "";
+      btn.classList.remove("arm");
+      btn.textContent = btn.dataset.label;
+    }, 4000);
+  });
+}
+
 async function writeAudioSettings(next) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.MODES, FUNC.AUDIO_SETTINGS, audioSettingsPayload(next)),
     "音效",
   );
@@ -622,7 +1041,7 @@ async function setWind(on) {
 }
 
 async function setSidetone(level) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.SIDETONE, sidetonePayload(level)),
     "侧音",
   );
@@ -632,7 +1051,7 @@ async function setSidetone(level) {
 }
 
 async function setMultipoint(on) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.MULTIPOINT, Uint8Array.of(on ? 1 : 0)),
     "双连",
   );
@@ -642,7 +1061,7 @@ async function setMultipoint(on) {
 }
 
 async function setConversation(on) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.CONVERSATION, Uint8Array.of(on ? 1 : 0)),
     "对话",
   );
@@ -652,7 +1071,7 @@ async function setConversation(on) {
 }
 
 async function setStandby(minutes) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.STANDBY, Uint8Array.of(minutes & 0xff)),
     "自动关",
   );
@@ -665,7 +1084,7 @@ async function setCnc(level) {
   if (state.hasAudioSettings || state.channel15 === false) {
     if (!(await writeAudioSettings({ ...state.cfg, cnc: level, anc: true }))) return;
   } else {
-    const reply = await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪", 800);
+    const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪", 800);
     if (reply) state.channel15 = true;
     else {
       state.channel15 = false;
@@ -678,7 +1097,7 @@ async function setCnc(level) {
 }
 
 async function setVoicePrompt(enabled, language) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS, voicePromptPayload(enabled, language)),
     "语音提示",
   );
@@ -689,7 +1108,7 @@ async function setVoicePrompt(enabled, language) {
 }
 
 async function setCaptouchDisabled(disabled) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH, flagPayload(disabled)),
     "触控",
   );
@@ -700,7 +1119,7 @@ async function setCaptouchDisabled(disabled) {
 }
 
 async function setAutoAnswer(on) {
-  const reply = await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER, flagPayload(on)), "自动接听");
+  const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER, flagPayload(on)), "自动接听");
   if (!reply) return false;
   state.autoAnswer = on;
   renderToggles();
@@ -708,7 +1127,7 @@ async function setAutoAnswer(on) {
 }
 
 async function setAutoPlayPause(on) {
-  const reply = await tryAsk(
+  const reply = await writeAsk(
     setGet(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE, flagPayload(on)),
     "自动播放",
   );
@@ -721,15 +1140,25 @@ async function setAutoPlayPause(on) {
 function hasBmapData() {
   return Boolean(
     state.name || state.battery.length || state.eq.length || state.cnc ||
-    state.modes.length || state.info.product || state.info.firmware,
+    state.modesAll.length || state.info.product || state.info.firmware,
   );
+}
+
+function resetDevice() {
+  state.modesAll = [];
+  state.favorites = null;
+  state.shortcut = null;
+  state.devices = [];
+  state.hasTransport = false;
+  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  closeEditor();
 }
 
 async function connect() {
   if (state.busy) return;
   state.busy = true;
   state.link = "idle";
-  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  resetDevice();
   renderAll();
   try {
     await ble.connect({ acceptAll: false });
@@ -775,7 +1204,7 @@ ui.deviceToggle.addEventListener("click", () => {
 
 ble.onDisconnected = () => {
   state.busy = false;
-  state.info = { product: "", firmware: "", serial: "", mac: "", made: "", hardware: "" };
+  resetDevice();
   setInfo(false);
   if (state.link === "ready") state.link = "lost";
   renderAll();
@@ -788,4 +1217,3 @@ if (!navigator.bluetooth && !hasNative()) {
   state.link = "unsupported";
 }
 renderAll();
-if (hasNative()) connect();

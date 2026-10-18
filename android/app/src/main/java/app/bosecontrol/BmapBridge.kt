@@ -55,6 +55,19 @@ class BmapBridge(
         main.post { close() }
     }
 
+    /** 诊断用：蓝牙开关状态、已配对 Bose 设备数。 */
+    @JavascriptInterface
+    fun env(): String {
+        val ad = adapter
+        val state = when {
+            ad == null -> 0
+            ad.isEnabled -> 1
+            else -> 2
+        }
+        val bonded = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
+        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded}"
+    }
+
     fun scanInternal() {
         val ad = adapter ?: return fail("adapter")
         if (!ad.isEnabled) return fail("off")

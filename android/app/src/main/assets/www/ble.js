@@ -30,6 +30,7 @@ export class BoseBle {
     this.pending = new Map();
     this.onPacket = null;
     this.onDisconnected = null;
+    this.lastError = "";
     this._gate = Promise.resolve();
     this._bindNative();
   }
@@ -70,7 +71,8 @@ export class BoseBle {
       this.onDisconnected?.();
     };
     window.onNativeError = (msg) => {
-      this._connectWait?.reject(new Error(String(msg || "native error")));
+      this.lastError = String(msg || "native error");
+      this._connectWait?.reject(new Error(this.lastError));
       this._connectWait = null;
     };
   }
@@ -78,12 +80,35 @@ export class BoseBle {
   async connect({ acceptAll = false } = {}) {
     if (hasNative()) {
       this.reassembler = createReassembler();
+      this.lastError = "";
       await new Promise((resolve, reject) => {
-        this._connectWait = { resolve, reject };
+        // 原生端可能永远不回包（权限弹窗被系统吞掉、扫描被拦），超时就得放行重试
+        const timer = setTimeout(() => {
+          if (!this._connectWait) return;
+          this._connectWait = null;
+          this.lastError = "timeout";
+          try {
+            nativeCall("bleDisconnect");
+          } catch {
+            /* ignore */
+          }
+          reject(new Error("timeout"));
+        }, 30000);
+        this._connectWait = {
+          resolve: () => {
+            clearTimeout(timer);
+            resolve();
+          },
+          reject: (err) => {
+            clearTimeout(timer);
+            reject(err);
+          },
+        };
         try {
           nativeCall("bleScan");
         } catch (err) {
           this._connectWait = null;
+          clearTimeout(timer);
           reject(err);
         }
       });

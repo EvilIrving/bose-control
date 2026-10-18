@@ -50,6 +50,41 @@ export const LABELS = {
   voice: { zh: "语音提示", en: "Voice Prompts" },
   others: { zh: "其它", en: "Other" },
   standby: { zh: "自动关机", en: "Auto-Off" },
+  playback: { zh: "播放控制", en: "Playback" },
+
+  name: { zh: "耳机名称", en: "Headset Name" },
+  shortcut: { zh: "快捷动作", en: "Shortcut" },
+  favorites: { zh: "机身模式循环", en: "Headset Mode Cycle" },
+  devices: { zh: "已配对设备", en: "Paired Devices" },
+  headset: { zh: "耳机操作", en: "Headset Actions" },
+
+  diag: { zh: "诊断", en: "Diagnostics" },
+  bridge: { zh: "原生桥", en: "Native bridge" },
+  btState: { zh: "蓝牙", en: "Bluetooth" },
+  btOn: { zh: "已开启", en: "On" },
+  btOff: { zh: "已关闭", en: "Off" },
+  btNone: { zh: "不可用", en: "Unavailable" },
+  lastError: { zh: "上次错误", en: "Last error" },
+
+  create: { zh: "新建模式", en: "New Mode" },
+  edit: { zh: "编辑模式", en: "Edit Mode" },
+  modeName: { zh: "名称", en: "Name" },
+  autoCnc: { zh: "自动消噪", en: "Auto Noise Cancellation" },
+  cycle: { zh: "机身可切换", en: "On Headset" },
+  save: { zh: "保存", en: "Save" },
+  cancel: { zh: "取消", en: "Cancel" },
+  remove: { zh: "删除", en: "Delete" },
+
+  prev: { zh: "上一曲", en: "Previous" },
+  play: { zh: "播放", en: "Play" },
+  pause: { zh: "暂停", en: "Pause" },
+  next: { zh: "下一曲", en: "Next" },
+
+  pair: { zh: "进入配对", en: "Pairing Mode" },
+  powerOff: { zh: "关机", en: "Power Off" },
+  again: { zh: "再点一次", en: "Tap Again" },
+  connected: { zh: "已连接", en: "Connected" },
+  press: { zh: "按键", en: "Button" },
 
   wind: { zh: "风噪滤除", en: "Wind Block" },
   multipoint: { zh: "多点连接", en: "Multipoint" },
@@ -122,8 +157,66 @@ export const VOICE_LANGUAGES = {
   22: { zh: "印地语", en: "Hindi" },
 };
 
+// 官方名称：equalizer_bass_value / equalizer_mid_value / equalizer_treble_value
+// 以及 low_mid / high_mid 两个扩展频段。
+export const EQ_BANDS = {
+  0: { zh: "低音", en: "Bass" },
+  1: { zh: "中音", en: "Mid" },
+  2: { zh: "高音", en: "Treble" },
+  3: { zh: "低中频", en: "Low-Mid" },
+  4: { zh: "中高频", en: "High-Mid" },
+};
+
+export function eqBandName(id) {
+  return EQ_BANDS[id]?.[lang] ?? String(id);
+}
+
 export function t(key) {
   return LABELS[key]?.[lang] ?? key;
+}
+
+// ActionButtonMode：官方枚举。22/23/24/25/26 在 App 里没有面向用户的含义，按 id 显示。
+const ACTIONS = {
+  0: { zh: "未设置", en: "Not Set" },
+  1: { zh: "语音助手", en: "Voice Assistant" },
+  2: { zh: "消噪", en: "Noise Cancellation" },
+  3: { zh: "电量播报", en: "Battery Level" },
+  4: { zh: "播放/暂停", en: "Play/Pause" },
+  5: { zh: "提高消噪", en: "More Cancellation" },
+  6: { zh: "降低消噪", en: "Less Cancellation" },
+  7: { zh: "唤醒词", en: "Wake Word" },
+  8: { zh: "切换设备", en: "Switch Device" },
+  9: { zh: "对话模式", en: "Conversation Mode" },
+  10: { zh: "下一曲", en: "Next Track" },
+  11: { zh: "上一曲", en: "Previous Track" },
+  12: { zh: "读取通知", en: "Read Notifications" },
+  13: { zh: "风噪模式", en: "Wind Mode" },
+  14: { zh: "无动作", en: "No Action" },
+  15: { zh: "客户端交互", en: "Client Interaction" },
+  16: { zh: "Spotify", en: "Spotify" },
+  17: { zh: "模式轮播", en: "Mode Carousel" },
+  18: { zh: "音量预设", en: "Volume Preset" },
+  19: { zh: "沉浸式音频", en: "Immersive Audio" },
+  20: { zh: "线路输入", en: "Line In" },
+  21: { zh: "设备联动", en: "Linking" },
+  27: { zh: "Alexa", en: "Alexa" },
+};
+
+export function actionName(id) {
+  return ACTIONS[id]?.[lang] ?? `${t("press")} ${id}`;
+}
+
+const PRESSES = {
+  3: { zh: "短按", en: "Short Press" },
+  4: { zh: "单击", en: "Single Press" },
+  6: { zh: "双击", en: "Double Press" },
+  8: { zh: "三击", en: "Triple Press" },
+  9: { zh: "长按", en: "Long Press" },
+  10: { zh: "超长按", en: "Very Long Press" },
+};
+
+export function pressName(eventType) {
+  return PRESSES[eventType]?.[lang] ?? `${t("press")} ${eventType}`;
 }
 
 export function pick(option) {

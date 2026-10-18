@@ -16,10 +16,17 @@ import {
   isSegmentHeader,
   modeSwitchPayload,
   audioSettingsPayload,
+  actionButtonPayload,
+  favoritesPayload,
+  modeConfigPayload,
+  namePayload,
+  parseActionButton,
   parseAudioSettings,
   parseBattery,
   parseCnc,
+  parseDeviceList,
   parseEq,
+  parseFavorites,
   parseFirmware,
   parseMacAddress,
   parseManufactured,
@@ -94,13 +101,24 @@ test("parseBattery reads percent and component", () => {
   ]);
 });
 
-test("parseEq maps band 1 to 人声 and signed current", () => {
+test("parseEq keeps band id and signed levels", () => {
   const bands = parseEq(Uint8Array.of(0xf6, 10, 0xfe, 1, 0xf6, 10, 3, 2));
-  assert.equal(bands[0].name, "人声");
+  assert.equal(bands[0].id, 1);
   assert.equal(bands[0].current, -2);
   assert.equal(bands[0].min, -10);
-  assert.equal(bands[1].name, "高音");
+  assert.equal(bands[1].id, 2);
   assert.equal(bands[1].current, 3);
+});
+
+test("EQ 频段名有官方中英文案", async () => {
+  const { setLang, eqBandName } = await import("../web/labels.js");
+  setLang("zh");
+  assert.equal(eqBandName(0), "低音");
+  assert.equal(eqBandName(1), "中音");
+  assert.equal(eqBandName(2), "高音");
+  setLang("en");
+  assert.equal(eqBandName(1), "Mid");
+  setLang("zh");
 });
 
 test("parseCnc reads step count then current; max index is count-1", () => {
@@ -337,8 +355,119 @@ test("web files are a complete page", () => {
   assert.match(html, /id="sidetone"/);
   assert.match(html, /id="hint"/);
   assert.match(html, /id="device-toggle"/);
+  assert.match(html, /id="diag"/);
+  assert.match(html, /"noModule" in HTMLScriptElement\.prototype/);
   assert.ok(html.indexOf('id="info"') < html.indexOf('<main'), "设备信息面板要在 header 与 main 之间");
   assert.doesNotMatch(html, /fold-label/);
   assert.match(html, /app\.js/);
   assert.doesNotMatch(html, /不登录|本地控制|走 \[31\.10\]|刷新|其他/);
+});
+
+test("31.8 favorites round-trips the官方 bitmask order", () => {
+  const payload = favoritesPayload(11, [0, 9]);
+  assert.deepEqual([...payload], [11, 0b00000010, 0b00000001]);
+  assert.deepEqual(parseFavorites(payload), { count: 11, indices: [0, 9] });
+});
+
+test("31.8 parses a device mask back to indices", () => {
+  assert.deepEqual(parseFavorites(Uint8Array.of(16, 0b00000100, 0b00000011)), {
+    count: 16,
+    indices: [0, 1, 10],
+  });
+});
+
+test("31.6 SETGET is 40 bytes: index, prompt, 32-byte name, cnc, auto, spatial, wind, anc", () => {
+  const payload = modeConfigPayload({
+    index: 4,
+    prompt: [0, 0],
+    name: "橡胶",
+    cnc: 8,
+    auto: false,
+    spatial: 1,
+    wind: true,
+    anc: true,
+  });
+  assert.equal(payload.length, 40);
+  assert.equal(payload[0], 4);
+  assert.deepEqual([...payload.slice(1, 3)], [0, 0]);
+  assert.equal(new TextDecoder().decode(payload.slice(3, 9)), "橡胶");
+  assert.equal(payload[9], 0, "名字后面要留 NUL");
+  assert.deepEqual([...payload.slice(35)], [8, 0, 1, 1, 1]);
+});
+
+test("31.6 truncates a long name without splitting a UTF-8 sequence", () => {
+  const payload = modeConfigPayload({ index: 5, name: "一一一一一一一一一一一一", cnc: 5 });
+  const bytes = payload.slice(3, 35);
+  const text = new TextDecoder().decode(bytes).replace(/\0+$/, "");
+  assert.equal(text, "一一一一一一一一一一");
+  assert.equal(bytes[30], 0);
+});
+
+test("1.9 SETGET carries button id, event type and action", () => {
+  const config = { buttonId: 128, eventType: 9 };
+  assert.deepEqual([...setGet(FBLOCK.SETTINGS, FUNC.BUTTONS, actionButtonPayload(config, 19))], [
+    0x01, 0x09, 0x02, 0x03, 128, 9, 19,
+  ]);
+});
+
+test("1.9 reply lists supported actions and the current one", () => {
+  const payload = new Uint8Array(11);
+  payload[0] = 128;
+  payload[1] = 9;
+  payload[2] = 19;
+  payload[6] = 0b00010010;
+  payload[9] = 0b00000001;
+  const config = parseActionButton(payload);
+  assert.equal(config.buttonId, 128);
+  assert.equal(config.eventType, 9);
+  assert.equal(config.action, 19);
+  assert.deepEqual(config.supported, [1, 4]);
+  assert.deepEqual(config.unavailable, [8]);
+});
+
+test("4.4 device list is a connected bitmap plus six bytes per device", () => {
+  const payload = Uint8Array.of(
+    0b00000011,
+    0x40, 0x58, 0x46, 0xf3, 0xf2, 0x18,
+    0x68, 0xf2, 0x1f, 0x0d, 0x94, 0x89,
+  );
+  assert.deepEqual(parseDeviceList(payload), [
+    { mac: "40:58:46:F3:F2:18", connected: true },
+    { mac: "68:F2:1F:0D:94:89", connected: true },
+  ]);
+  assert.deepEqual(parseDeviceList(Uint8Array.of(0)), []);
+});
+
+test("transport, power and pairing use one-byte START payloads", () => {
+  assert.deepEqual([...start(FBLOCK.AUDIO, FUNC.TRANSPORT, Uint8Array.of(3))], [0x05, 0x03, 0x05, 0x01, 3]);
+  assert.deepEqual([...start(FBLOCK.CONTROL, FUNC.POWER, Uint8Array.of(0))], [0x07, 0x04, 0x05, 0x01, 0]);
+  assert.deepEqual([...start(FBLOCK.DEVICE, FUNC.PAIRING, Uint8Array.of(1))], [0x04, 0x08, 0x05, 0x01, 1]);
+});
+
+test("1.2 SETGET sends the raw UTF-8 name", () => {
+  assert.deepEqual([...namePayload("我的耳机")], [...new TextEncoder().encode("我的耳机")]);
+});
+
+test("快捷动作文案覆盖官方枚举，未知值回落到编号", async () => {
+  const { actionName, pressName, setLang } = await import("../web/labels.js");
+  setLang("zh");
+  assert.equal(actionName(8), "切换设备");
+  assert.equal(actionName(11), "上一曲");
+  assert.equal(actionName(19), "沉浸式音频");
+  assert.equal(actionName(22), "按键 22");
+  assert.equal(pressName(9), "长按");
+  setLang("en");
+  assert.equal(actionName(8), "Switch Device");
+  assert.equal(pressName(9), "Long Press");
+  setLang("zh");
+});
+
+test("自定义模式与快捷键的容器都在页面里", () => {
+  const dir = dirname(fileURLToPath(import.meta.url));
+  const html = readFileSync(join(dir, "../web/index.html"), "utf8");
+  for (const id of ["mode-editor", "transport", "rename", "shortcut", "favorites", "devices", "headset-actions"]) {
+    assert.match(html, new RegExp(`id="${id}"`), `缺少 ${id}`);
+  }
+  assert.ok(html.indexOf('id="shortcut"') > html.indexOf('id="settings"'), "快捷键在设置页");
+  assert.ok(html.indexOf('id="transport"') < html.indexOf('id="settings"'), "播放控制在主页");
 });

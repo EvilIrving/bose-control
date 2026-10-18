@@ -4,8 +4,10 @@ import SwiftUI
 struct BoseControlApp: App {
     var body: some Scene {
         WindowGroup {
-            WebScreen()
-                .ignoresSafeArea()
+            ZStack {
+                Color.black.ignoresSafeArea()
+                WebScreen()
+            }
         }
     }
 }

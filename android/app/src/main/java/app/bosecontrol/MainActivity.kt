@@ -1,6 +1,7 @@
 package app.bosecontrol
 
 import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -16,10 +17,20 @@ class MainActivity : ComponentActivity() {
     private lateinit var web: WebView
     private lateinit var bridge: BmapBridge
 
+    private var pendingScan = false
+
+    private val btPermissions: Array<String>
+        get() = if (Build.VERSION.SDK_INT >= 31) {
+            arrayOf(Manifest.permission.BLUETOOTH_SCAN, Manifest.permission.BLUETOOTH_CONNECT)
+        } else {
+            arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        }
+
     private val ask = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
-        if (granted.values.all { it }) bridge.scanInternal()
+        // 有的 ROM 会回一个空的 map，values.all{} 对空 map 恒为 true，必须按 key 查
+        if (btPermissions.all { granted[it] == true }) bridge.scanInternal()
         else bridge.fail("permission")
     }
 
@@ -56,10 +67,25 @@ class MainActivity : ComponentActivity() {
     }
 
     fun requestBtThenScan() {
-        val perms = if (Build.VERSION.SDK_INT >= 31) arrayOf(
-            Manifest.permission.BLUETOOTH_SCAN,
-            Manifest.permission.BLUETOOTH_CONNECT,
-        ) else arrayOf(Manifest.permission.ACCESS_FINE_LOCATION)
+        val perms = btPermissions
+        val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
+        if (missing.isEmpty()) {
+            bridge.scanInternal()
+            return
+        }
+        // 冷启动时 activity 还没到 RESUMED，这时 launch 可能被系统丢掉，等 onResume 再弹
+        if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
+            pendingScan = true
+            return
+        }
         ask.launch(perms)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (pendingScan) {
+            pendingScan = false
+            requestBtThenScan()
+        }
     }
 }

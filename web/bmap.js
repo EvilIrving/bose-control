@@ -51,7 +51,13 @@ export const FUNC = {
   MODE_CAPS: 0x02,
   CURRENT_MODE: 0x03,
   MODE_CONFIG: 0x06,
+  USER_INDICES: 0x07,
+  FAVORITES: 0x08,
+  MODE_RESET: 0x09,
   AUDIO_SETTINGS: 0x0a,
+  DEVICE_LIST: 0x04,
+  PAIRING: 0x08,
+  TRANSPORT: 0x03,
 };
 
 export const PROMPTS = {
@@ -347,13 +353,10 @@ export function audioSettingsPayload(cfg) {
 }
 
 export function parseEq(payload) {
-  const names = { 0: "低音", 1: "人声", 2: "高音" };
   const bands = [];
   for (let i = 0; i + 3 < payload.length; i += 4) {
-    const id = payload[i + 3];
     bands.push({
-      id,
-      name: names[id] ?? `频段${id}`,
+      id: payload[i + 3],
       min: i8(payload[i]),
       max: i8(payload[i + 1]),
       current: i8(payload[i + 2]),
@@ -401,16 +404,117 @@ export function parseModeConfig(payload) {
   const promptName = PROMPTS[promptId] ?? "";
   return {
     index: payload[0],
+    prompt: [payload[1] ?? 0, promptId],
     promptId,
     name: nameFromDevice || promptName || `模式 ${payload[0]}`,
     editable: payload[3] === 1,
     configured: payload.length > 4 ? payload[4] === 1 : true,
+    favorite: payload.length > 5 ? payload[5] === 1 : false,
     cnc: payload.length > 42 ? payload[42] : null,
+    auto: payload.length > 43 ? payload[43] === 1 : false,
     spatial: payload.length > 44 ? payload[44] : null,
-    wind: payload.length > 46 ? payload[payload.length >= 48 ? 46 : 46] : null,
-    anc: payload.length > 47 ? payload[47] : null,
+    wind: payload.length > 46 ? payload[46] === 1 : false,
+    anc: payload.length > 47 ? payload[47] === 1 : false,
   };
 }
+
+// SETGET 31.6 payload is 40 bytes: mode, prompt(2), name(32), cnc, auto, spatial, wind, anc.
+// The 48-byte reply packs the same tail at 42/43/44/46/47 behind a mutability bitfield at 41.
+export function modeConfigPayload(mode) {
+  const out = new Uint8Array(40);
+  out[0] = mode.index & 0xff;
+  out[1] = mode.prompt?.[0] ?? 0;
+  out[2] = mode.prompt?.[1] ?? 0;
+  putCstr(out, 3, mode.name, 32);
+  out[35] = (mode.cnc ?? 0) & 0xff;
+  out[36] = mode.auto ? 1 : 0;
+  out[37] = (mode.spatial ?? 0) & 0xff;
+  out[38] = mode.wind ? 1 : 0;
+  out[39] = mode.anc ? 1 : 0;
+  return out;
+}
+
+function putCstr(out, offset, text, size) {
+  const bytes = new TextEncoder().encode(String(text ?? "").trim());
+  let n = Math.min(bytes.length, size - 1);
+  while (n > 0 && (bytes[n] & 0xc0) === 0x80) n -= 1;
+  out.set(bytes.slice(0, n), offset);
+}
+
+// 31.8 packs the count first, then a bitmask whose first byte holds the highest eight indices.
+export function parseFavorites(payload) {
+  if (!payload.length) return null;
+  const count = payload[0];
+  const maskBytes = Math.ceil(count / 8);
+  const indices = [];
+  for (let i = maskBytes; i >= 1; i--) {
+    const byte = payload[i] ?? 0;
+    for (let bit = 0; bit < 8; bit++) {
+      if ((byte >> bit) & 1) indices.push((maskBytes - i) * 8 + bit);
+    }
+  }
+  return { count, indices: indices.filter((index) => index < count) };
+}
+
+export function favoritesPayload(count, indices) {
+  const maskBytes = Math.ceil(Math.max(1, count) / 8);
+  const out = new Uint8Array(maskBytes + 1);
+  out[0] = count & 0xff;
+  for (const index of indices) {
+    if (index < 0 || index >= count) continue;
+    out[maskBytes - Math.floor(index / 8)] |= 1 << index % 8;
+  }
+  return out;
+}
+
+function bitsOf(bytes) {
+  const bits = [];
+  for (let i = 0; i < bytes.length * 8; i++) {
+    if ((bytes[bytes.length - 1 - Math.floor(i / 8)] >> i % 8) & 1) bits.push(i);
+  }
+  return bits;
+}
+
+// 1.9 replies with button id, event type, current action, then support bitfields.
+export function parseActionButton(payload) {
+  if (payload.length < 3) return null;
+  const supported = bitsOf(payload.slice(3, Math.min(7, payload.length))).filter((id) => id > 0);
+  const unavailable =
+    payload.length > 7
+      ? bitsOf(payload.slice(7, Math.min(11, payload.length))).filter((id) => id > 0)
+      : [];
+  return {
+    buttonId: payload[0],
+    eventType: payload[1],
+    action: payload[2],
+    supported: supported.filter((id) => !unavailable.includes(id)),
+    unavailable,
+  };
+}
+
+export function actionButtonPayload(config, action) {
+  return Uint8Array.of(config.buttonId, config.eventType, action & 0xff);
+}
+
+// 4.4: connected bitmap, then six bytes per paired device.
+export function parseDeviceList(payload) {
+  if (payload.length <= 1) return [];
+  const connected = payload[0];
+  const devices = [];
+  for (let i = 1; i + 5 < payload.length; i += 6) {
+    devices.push({
+      mac: parseMacAddress(payload.slice(i, i + 6)),
+      connected: Boolean((connected >> devices.length) & 1),
+    });
+  }
+  return devices;
+}
+
+export function namePayload(name) {
+  return new TextEncoder().encode(String(name ?? "").trim());
+}
+
+export const TRANSPORT = { play: 1, pause: 2, next: 3, prev: 4 };
 
 export function eqPayload(value, bandId) {
   return Uint8Array.of(value & 0xff, bandId);

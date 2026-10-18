@@ -20,14 +20,34 @@
       document.addEventListener("gestureend", (e) => e.preventDefault());
       document.addEventListener("dblclick", (e) => e.preventDefault());
       document.addEventListener("contextmenu", (e) => e.preventDefault());
-      document.addEventListener(
-        "click",
-        (e) => {
-          if (window.__boseApp) return;
-          if (e.target && e.target.id === "go") window.NativeBLE && window.NativeBLE.bleScan();
-        },
-        true,
-      );
+      (function () {
+        var chrome = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || "?";
+        function hint(text) {
+          var paint = function () {
+            document.body.classList.add("idle");
+            var el = document.getElementById("hint");
+            if (el) el.textContent = text;
+          };
+          if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", paint);
+          else paint();
+        }
+        // 老 WebView 不支持 type="module"，app.js 根本不会执行，这里直接说清楚
+        if (!("noModule" in HTMLScriptElement.prototype)) {
+          hint("系统 WebView 太旧，请升级（Chromium " + chrome + "）");
+          return;
+        }
+        document.addEventListener(
+          "click",
+          (e) => {
+            if (window.__boseApp) return;
+            var go = e.target && e.target.closest && e.target.closest("#go");
+            if (!go) return;
+            hint("页面脚本没加载起来（Chromium " + chrome + "）");
+            window.NativeBLE && window.NativeBLE.bleScan();
+          },
+          true,
+        );
+      })();
     </script>
   </head>
   <body>
@@ -51,6 +71,7 @@
         <h2 data-label="modes"></h2>
         <div id="modes" class="chips"></div>
       </section>
+      <section id="mode-editor" hidden></section>
       <section>
         <h2 data-label="cnc"></h2>
         <div id="cnc" class="levels"></div>
@@ -72,6 +93,10 @@
         <div id="toggles" class="chips"></div>
       </section>
       <section>
+        <h2 data-label="playback"></h2>
+        <div id="transport" class="chips"></div>
+      </section>
+      <section>
         <button id="settings-open" class="chip" type="button" data-label="settings"></button>
       </section>
     </main>
@@ -85,6 +110,18 @@
         <div id="lang" class="chips"></div>
       </section>
       <section>
+        <h2 data-label="name"></h2>
+        <div id="rename" class="field"></div>
+      </section>
+      <section>
+        <h2 id="shortcut-title"></h2>
+        <div id="shortcut" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="favorites"></h2>
+        <div id="favorites" class="chips"></div>
+      </section>
+      <section>
         <h2 data-label="voice"></h2>
         <div id="voice" class="chips"></div>
       </section>
@@ -95,6 +132,18 @@
       <section>
         <h2 data-label="standby"></h2>
         <div id="standby" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="devices"></h2>
+        <div id="devices" class="rows"></div>
+      </section>
+      <section>
+        <h2 data-label="headset"></h2>
+        <div id="headset-actions" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="diag"></h2>
+        <div id="diag" class="rows"></div>
       </section>
     </section>
     <script type="module" src="./app.js"></script>
