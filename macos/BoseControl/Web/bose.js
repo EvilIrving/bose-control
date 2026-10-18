@@ -63,6 +63,12 @@ import { chip, chips, fillRows, pane } from "./ui.js";
 // Bose 的 BMAP 实现：读全量状态、写各项设置、把面板画出来。
 // 宿主只认下面这几个入口：load() / render() / renderSettings() / diagRows()。
 export function createBoseSession({ link, ui, state, refresh, log }) {
+// 耳机支持的功能会在一百毫秒以内回包，不回的基本就是没有这个功能，
+// 所以首轮只等很短；没回的挂到后台用长一点的超时补一次 —— 界面不等它。
+const READ_TIMEOUT = 500;
+const RETRY_TIMEOUT = 1000;
+const DETAIL_TIMEOUT = 600;
+const WRITE_TIMEOUT = 2000;
 const MODE_ZH = {
   Quiet: "安静",
   Aware: "通透",
@@ -90,7 +96,7 @@ function freeSlot() {
 }
 
 async function ask(packet, label, timeoutMs) {
-  const reply = await link.request(packet, timeoutMs ?? 2500);
+  const reply = await link.request(packet, timeoutMs ?? WRITE_TIMEOUT);
   if (reply.op === OP.ERROR) {
     const code = reply.payload[0] ?? reply.payload[1] ?? "?";
     throw new Error(`${label} ${code}`);
@@ -107,32 +113,39 @@ async function tryAsk(packet, label, timeoutMs) {
   }
 }
 
-async function readInfo(packet, label) {
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const reply = await tryAsk(packet, label, 1200);
-    if (reply) return reply;
-  }
-  return null;
+// 设备信息里的细节项，读不到就算了，不值得再等一次
+function readDetail(packet, label, apply) {
+  return tryAsk(packet, label, DETAIL_TIMEOUT).then((reply) => {
+    if (reply) apply(reply);
+  });
 }
 
-async function probe(packet, label, timeoutMs = 800) {
-  const first = await tryAsk(packet, label, timeoutMs);
-  if (first) return first;
-  return tryAsk(packet, label, timeoutMs * 2);
+// 首轮没回的读取记在这里，启动完成后再统一补一次（带长超时）
+let retries = [];
+
+// 读一项设置，结果直接落到 state 上；没回就排队等后台补
+function read(packet, label, apply) {
+  return tryAsk(packet, label, READ_TIMEOUT).then((reply) => {
+    if (reply) apply(reply);
+    else retries.push({ packet, label, apply });
+  });
 }
 
-async function supported(packet, label, timeoutMs = 700) {
-  try {
-    await link.request(packet, timeoutMs);
-    return true;
-  } catch {
-    return false;
-  }
+async function settleRetries() {
+  const jobs = retries.splice(0);
+  if (!jobs.length) return;
+  await Promise.all(
+    jobs.map(async (job) => {
+      const reply = await tryAsk(job.packet, job.label, RETRY_TIMEOUT);
+      if (reply) job.apply(reply);
+    }),
+  );
+  refresh();
 }
 
 async function writeAsk(packet, label) {
   for (let attempt = 0; attempt < 2; attempt++) {
-    const reply = await tryAsk(packet, label);
+    const reply = await tryAsk(packet, label, WRITE_TIMEOUT);
     if (reply) return reply;
   }
   return null;
@@ -427,51 +440,33 @@ function renderStandby() {
 }
 
 async function loadDevice() {
-  await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", 1200);
+  retries = [];
+  // 第一批：屏幕上立刻要看的东西。彼此不依赖，一起飞，屏幕不再等全量读完才出内容。
+  const [versionReply, cfgReply, cncReply] = await Promise.all([
+    tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", READ_TIMEOUT),
+    read(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", (reply) => {
+      state.info.product = parseProductId(reply.payload);
+      state.info.productName = productName(productIdOf(reply.payload));
+    }),
+    read(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", (reply) => {
+      state.info.firmware = parseFirmware(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", (reply) => {
+      state.name = parseName(reply.payload) || link.name;
+    }),
+    read(get(FBLOCK.STATUS, FUNC.BATTERY), "电量", (reply) => {
+      state.battery = parseBattery(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡", (reply) => {
+      state.eq = parseEq(reply.payload);
+    }),
+    tryAsk(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", READ_TIMEOUT),
+    tryAsk(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", READ_TIMEOUT),
+    loadModes(),
+  ]);
+  log(versionReply ? "init-ok" : "init-silent");
 
-  const productReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.PRODUCT_ID), "型号", 1200);
-  if (productReply) {
-    state.info.product = parseProductId(productReply.payload);
-    state.info.productName = productName(productIdOf(productReply.payload));
-  }
-
-  const firmwareReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.FIRMWARE), "固件", 1200);
-  if (firmwareReply) state.info.firmware = parseFirmware(firmwareReply.payload);
-
-  const serialReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", 1200);
-  if (serialReply) state.info.serial = parseSerialNumber(serialReply.payload);
-
-  const macReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.MAC_ADDRESS), "MAC", 1200);
-  if (macReply) state.info.mac = parseMacAddress(macReply.payload);
-
-  const guidReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.GUID), "GUID", 1200);
-  if (guidReply) state.info.guid = parseGuid(guidReply.payload);
-
-  const originalReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.ORIGINAL_NAME), "原厂名称", 1200);
-  if (originalReply) state.info.originalName = parseFirmware(originalReply.payload);
-
-  const componentReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.COMPONENT_ID), "组件", 1200);
-  if (componentReply) state.info.component = parseComponentId(componentReply.payload);
-
-  const leAudioReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", 1200);
-  if (leAudioReply) state.info.leAudio = parseFlag(leAudioReply.payload) ? "支持" : "不支持";
-
-  const madeReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", 1200);
-  if (madeReply) state.info.made = parseManufactured(madeReply.payload);
-
-  const hardwareReply = await readInfo(get(FBLOCK.PRODUCT, FUNC.HARDWARE_REVISION), "硬件", 1200);
-  if (hardwareReply) state.info.hardware = parseFirmware(hardwareReply.payload);
-
-  const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", 1200);
-  if (nameReply) state.name = parseName(nameReply.payload) || link.name;
-
-  const batReply = await readInfo(get(FBLOCK.STATUS, FUNC.BATTERY), "电量");
-  if (batReply) state.battery = parseBattery(batReply.payload);
-
-  const eqReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡", 1200);
-  if (eqReply) state.eq = parseEq(eqReply.payload);
-
-  const cfgReply = await tryAsk(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", 1200);
+  // 音效设置和降噪都能回的时候，降噪档位以音效包为准
   state.hasAudioSettings = false;
   if (cfgReply) {
     const cfg = parseAudioSettings(cfgReply.payload);
@@ -482,8 +477,6 @@ async function loadDevice() {
       state.cnc = { steps: 11, step: cfg.cnc, total: 11, enabled: true };
     }
   }
-
-  const cncReply = await probe(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", 800);
   if (cncReply) {
     state.cnc = parseCnc(cncReply.payload);
     if (state.hasAudioSettings && state.cfg.cnc != null) state.cnc.step = state.cfg.cnc;
@@ -491,59 +484,100 @@ async function loadDevice() {
 
   refresh();
 
-  const sideReply = await probe(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", 800);
-  if (sideReply) state.sidetone = parseSidetone(sideReply.payload);
-
-  const mpReply = await probe(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连", 800);
-  if (mpReply) state.multipoint = parseMultipoint(mpReply.payload);
-
-  const talkReply = await probe(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话", 500);
-  if (talkReply) state.conversation = parseConversation(talkReply.payload);
-
-  const autoReply = await probe(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机", 500);
-  if (autoReply) state.standby = parseStandby(autoReply.payload);
-
-  if (state.hasAudioSettings) {
-    const ok = await writeAudioSettings({ ...state.cfg });
-    log(ok ? "write-ok" : "write-fail");
-  }
+  // 第二批：设置页里的开关和列表，同样是各自独立的读取。首轮没回的直接挂到后台补，
+  // 不把已经能用的界面压在超时上。
+  await Promise.all([
+    read(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", (reply) => {
+      state.sidetone = parseSidetone(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连", (reply) => {
+      state.multipoint = parseMultipoint(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话", (reply) => {
+      state.conversation = parseConversation(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机", (reply) => {
+      state.standby = parseStandby(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS), "语音提示", (reply) => {
+      state.voice = parseVoicePrompts(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE), "自动播放", (reply) => {
+      state.autoPlay = parseFlag(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER), "自动接听", (reply) => {
+      state.autoAnswer = parseFlag(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控", (reply) => {
+      state.captouch = parseFlag(reply.payload);
+    }),
+    read(get(FBLOCK.SETTINGS, FUNC.BUTTONS), "快捷", (reply) => {
+      state.shortcut = parseActionButton(reply.payload);
+    }),
+    read(get(FBLOCK.DEVICE, FUNC.DEVICE_LIST), "设备列表", (reply) => {
+      state.devices = parseDeviceList(reply.payload);
+    }),
+    read(get(FBLOCK.AUDIO, FUNC.TRANSPORT), "播放", () => {
+      state.hasTransport = true;
+    }),
+  ]);
 
   refresh();
-  const voiceReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.VOICE_PROMPTS), "语音提示");
-  if (voiceReply) state.voice = parseVoicePrompts(voiceReply.payload);
+  // 补读和设备详情都不在关键路径上，界面先交出去
+  void settleRetries().then(loadDetail);
+  // 连上了但一个 BMAP 回包都没有（比如连到别家耳机），宿主据此判定「设备不支持」
+  return Boolean(
+    state.name || state.battery.length || state.eq.length || state.cnc ||
+    state.modesAll.length || state.info.product || state.info.firmware,
+  );
+}
 
-  const autoPlayReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.AUTO_PLAY_PAUSE), "自动播放");
-  if (autoPlayReply) state.autoPlay = parseFlag(autoPlayReply.payload);
-
-  const autoAnswerReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.AUTO_ANSWER), "自动接听");
-  if (autoAnswerReply) state.autoAnswer = parseFlag(autoAnswerReply.payload);
-
-  const captouchReply = await readInfo(get(FBLOCK.SETTINGS, FUNC.DISABLE_CAPTOUCH), "触控");
-  if (captouchReply) state.captouch = parseFlag(captouchReply.payload);
-
-  const shortcutReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.BUTTONS), "快捷", 900);
-  if (shortcutReply) state.shortcut = parseActionButton(shortcutReply.payload);
-
-  const devicesReply = await tryAsk(get(FBLOCK.DEVICE, FUNC.DEVICE_LIST), "设备列表", 900);
-  if (devicesReply) state.devices = parseDeviceList(devicesReply.payload);
-
-  state.hasTransport = await supported(get(FBLOCK.AUDIO, FUNC.TRANSPORT), "播放");
-
-  await loadModes();
+// 详情只在设备信息面板里看得到，留在后台读。
+async function loadDetail() {
+  await Promise.all([
+    readDetail(get(FBLOCK.PRODUCT, FUNC.SERIAL_NUMBER), "序列号", (reply) => {
+      state.info.serial = parseSerialNumber(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.MAC_ADDRESS), "MAC", (reply) => {
+      state.info.mac = parseMacAddress(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.GUID), "GUID", (reply) => {
+      state.info.guid = parseGuid(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.ORIGINAL_NAME), "原厂名称", (reply) => {
+      state.info.originalName = parseFirmware(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.COMPONENT_ID), "组件", (reply) => {
+      state.info.component = parseComponentId(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", (reply) => {
+      state.info.leAudio = parseFlag(reply.payload) ? "支持" : "不支持";
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", (reply) => {
+      state.info.made = parseManufactured(reply.payload);
+    }),
+    readDetail(get(FBLOCK.PRODUCT, FUNC.HARDWARE_REVISION), "硬件", (reply) => {
+      state.info.hardware = parseFirmware(reply.payload);
+    }),
+  ]);
   refresh();
 }
 
 async function loadModes() {
   state.modesAll = [];
   state.favorites = null;
-  const current = await tryAsk(get(FBLOCK.MODES, FUNC.CURRENT_MODE), "当前", 900);
+  const [current, capsReply, favoritesReply] = await Promise.all([
+    tryAsk(get(FBLOCK.MODES, FUNC.CURRENT_MODE), "当前", READ_TIMEOUT),
+    tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", READ_TIMEOUT),
+    tryAsk(get(FBLOCK.MODES, FUNC.FAVORITES), "循环", READ_TIMEOUT),
+  ]);
   if (current?.payload.length) state.currentMode = current.payload[0];
-  const capsReply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", 900);
+  if (favoritesReply) state.favorites = parseFavorites(favoritesReply.payload);
   const caps = capsReply ? parseModeCaps(capsReply.payload) : null;
   const builtin = caps?.bose ?? 0;
   const userReply = caps?.user
     ? null
-    : await tryAsk(get(FBLOCK.MODES, FUNC.USER_INDICES), "用户模式", 900);
+    : await tryAsk(get(FBLOCK.MODES, FUNC.USER_INDICES), "用户模式", READ_TIMEOUT);
   const users = userReply?.payload.length
     ? [...userReply.payload]
     : Array.from({ length: caps?.user ?? 0 }, (_, i) => builtin + i);
@@ -560,7 +594,7 @@ async function loadModes() {
     const reply = await tryAsk(
       get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(index)),
       `m${index}`,
-      900,
+      guessing ? READ_TIMEOUT : READ_TIMEOUT * 2,
     );
     if (!reply) {
       if (!guessing) continue;
@@ -573,8 +607,6 @@ async function loadModes() {
     if (mode) state.modesAll.push(mode);
     renderModes();
   }
-  const favoritesReply = await tryAsk(get(FBLOCK.MODES, FUNC.FAVORITES), "循环", 900);
-  if (favoritesReply) state.favorites = parseFavorites(favoritesReply.payload);
 }
 
 async function switchMode(index) {

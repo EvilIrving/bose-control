@@ -135,29 +135,102 @@ export class HuaweiHeadset {
     }
   }
 
-  // 探测能力：第一次没回包就把超时翻倍再问一次，慢设备不会被误判
+  // 探测能力：先短等一次（耳机支持的命令一百毫秒内就回），没回的交给调用方决定要不要补
   async probe(cmd, types, timeout = 900) {
-    const first = await this.tryRead(cmd, types, timeout);
-    if (first) return first;
-    return this.tryRead(cmd, types, timeout * 2);
+    return this.tryRead(cmd, types, timeout);
   }
 
-  // 一趟能读多少读多少；onlyMissing 只补上一趟没读到的
+  // 一趟能读多少读多少；onlyMissing 只补上一趟没读到的，slow 用长一点的超时再问
   async load() {
     this.reset();
     this.state.name = this.link.name || "HUAWEI";
-    await this.loadPass(false);
+    await this.loadPass(false, false);
     this.refresh();
-    await sleep(350);
-    await this.loadPass(true);
-    this.refresh();
+    // 手势和已配对设备只影响设置页，放后台读
+    void Promise.all([this.loadGestures(), this.loadDual()]).then(() => this.refresh());
+    if (!this.answered()) {
+      // 一条都没回来：可能连着但耳机还没醒。补一轮再判断「不支持」
+      await sleep(200);
+      await this.loadPass(false, true);
+      this.refresh();
+    } else if (this.missing()) {
+      // 只缺几项（耳机刚唤醒、或者正被别的连接占着）：后台补，已经能用的界面不等
+      void this.retryMissing();
+    }
+    return this.answered();
+  }
+
+  answered() {
     return Boolean(this.info.model || this.battery || this.eq || this.anc);
   }
 
-  async loadPass(onlyMissing) {
-    const info = onlyMissing && this.info.model ? null : await this.probe(CMD.info, [...Array(32).keys()], 2000);
-    if (info) this.readInfo(info);
+  async retryMissing() {
+    await sleep(150);
+    await this.loadPass(true, true);
+    this.refresh();
+  }
 
+  // 开关类项不在启动的关键路径上；手势和已配对设备更是只在设置页里看得到
+  missing() {
+    return (
+      !this.info.model || !this.battery || !this.anc || !this.eq ||
+      this.autoPause == null || this.lowLatency == null || this.quality == null || !this.voice
+    );
+  }
+
+  async loadPass(onlyMissing, slow) {
+    const jobs = [];
+    const job = (condition, run) => {
+      if (condition) jobs.push(run());
+    };
+    const infoTimeout = slow ? 2000 : 800;
+    const timeout = slow ? 1500 : 600;
+    // 每条命令都是独立的一问一答，没有先后依赖，一起问完拉倒
+    job(!onlyMissing || !this.info.model, () =>
+      this.probe(CMD.info, [...Array(32).keys()], infoTimeout).then((info) => {
+        if (info) this.readInfo(info);
+        this.syncInfo();
+      }),
+    );
+    job(!onlyMissing || !this.battery, () =>
+      this.probe(CMD.battery, [1, 2, 3], infoTimeout).then((battery) => {
+        if (battery) this.readBattery(battery);
+      }),
+    );
+    job(!onlyMissing || !this.anc, () =>
+      this.probe(CMD.ancRead, [1, 2], timeout).then((anc) => {
+        if (anc) this.readAnc(anc);
+      }),
+    );
+    job(!onlyMissing || !this.eq, () =>
+      this.probe(CMD.eqRead, [1, 2, 3, 4, 5, 6, 7, 8], timeout).then((eq) => {
+        if (eq) this.readEq(eq);
+      }),
+    );
+    job(!onlyMissing || this.autoPause == null, () =>
+      this.probe(CMD.autoPauseRead, [1], timeout).then((reply) => {
+        if (reply) this.autoPause = num(reply, 1) === 1;
+      }),
+    );
+    job(!onlyMissing || this.lowLatency == null, () =>
+      this.probe(CMD.lowLatency, [2], timeout).then((reply) => {
+        if (reply) this.lowLatency = num(reply, 2) === 1;
+      }),
+    );
+    job(!onlyMissing || this.quality == null, () =>
+      this.probe(CMD.qualityRead, [1], timeout).then((quality) => {
+        if (quality) this.readQuality(quality);
+      }),
+    );
+    job(!onlyMissing || !this.voice, () =>
+      this.probe(CMD.voiceRead, [1, 2, 3], timeout).then((voice) => {
+        if (voice) this.readVoice(voice);
+      }),
+    );
+    await Promise.all(jobs);
+  }
+
+  syncInfo() {
     const st = this.state;
     st.info = {
       productName: st.name,
@@ -170,44 +243,6 @@ export class HuaweiHeadset {
       leftSerial: this.info.left ?? "",
       rightSerial: this.info.right ?? "",
     };
-
-    if (!onlyMissing || !this.battery) {
-      const battery = await this.probe(CMD.battery, [1, 2, 3], 2000);
-      if (battery) this.readBattery(battery);
-    }
-
-    if (!onlyMissing || !this.anc) {
-      const anc = await this.probe(CMD.ancRead, [1, 2]);
-      if (anc) this.readAnc(anc);
-    }
-
-    if (!onlyMissing || !this.eq) {
-      const eq = await this.probe(CMD.eqRead, [1, 2, 3, 4, 5, 6, 7, 8]);
-      if (eq) this.readEq(eq);
-    }
-
-    if (!onlyMissing || this.autoPause == null) {
-      const autoPause = await this.probe(CMD.autoPauseRead, [1]);
-      if (autoPause) this.autoPause = num(autoPause, 1) === 1;
-    }
-
-    if (!onlyMissing || this.lowLatency == null) {
-      const lowLatency = await this.probe(CMD.lowLatency, [2]);
-      if (lowLatency) this.lowLatency = num(lowLatency, 2) === 1;
-    }
-
-    if (!onlyMissing || this.quality == null) {
-      const quality = await this.probe(CMD.qualityRead, [1]);
-      if (quality) this.readQuality(quality);
-    }
-
-    if (!onlyMissing || !this.voice) {
-      const voice = await this.probe(CMD.voiceRead, [1, 2, 3]);
-      if (voice) this.readVoice(voice);
-    }
-
-    if (!onlyMissing || !this.gestures) await this.loadGestures();
-    if (!onlyMissing || !this.dual) await this.loadDual();
   }
 
   readInfo(packet) {
@@ -285,21 +320,29 @@ export class HuaweiHeadset {
     this.voice = { options, current: this.voice?.current ?? "" };
   }
 
+  // 丢一包就少一块面板的读取，补一次长超时的；其余用 probe
+  async probeRetry(cmd, types, timeout = 900) {
+    const first = await this.probe(cmd, types, timeout);
+    return first ?? this.probe(cmd, types, timeout * 2);
+  }
+
   async loadGestures() {
+    const [double, triple, long, swipe] = await Promise.all([
+      this.probeRetry(CMD.doubleRead, [1, 2, 3, 4]),
+      this.probeRetry(CMD.tripleRead, [1, 2, 3, 4]),
+      this.probeRetry(CMD.longRead, [1, 2, 3, 4]),
+      this.probeRetry(CMD.swipeRead, [1, 2, 3]),
+    ]);
     const out = {};
-    const double = await this.probe(CMD.doubleRead, [1, 2, 3, 4]);
     if (double) out.double = tapState(double);
-    const triple = await this.probe(CMD.tripleRead, [1, 2, 3, 4]);
     if (triple) out.triple = tapState(triple);
-    const long = await this.probe(CMD.longRead, [1, 2, 3, 4]);
     if (long) out.long = tapState(long);
-    const swipe = await this.probe(CMD.swipeRead, [1, 2, 3]);
     if (swipe) out.swipe = { value: num(swipe, 1), options: codes(swipe, 3) };
     this.gestures = Object.keys(out).length ? out : null;
   }
 
   async loadDual() {
-    const enabled = await this.probe(CMD.dualRead, [1]);
+    const enabled = await this.probeRetry(CMD.dualRead, [1]);
     if (!enabled) return;
     this.dual = { enabled: num(enabled, 1) === 1, devices: [] };
     await this.loadDevices();

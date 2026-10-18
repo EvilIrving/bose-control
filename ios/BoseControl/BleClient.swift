@@ -120,6 +120,12 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         reset()
         found.removeAll()
         wantScan = false
+        // 已经连在手机上（比如正在听歌）的耳机不会出现在扫描结果里，先问系统要现成的，
+        // 否则要白等一轮扫描才轮到它
+        if let ready = connectedBose() {
+            connect(ready)
+            return
+        }
         central.scanForPeripherals(
             withServices: nil,
             options: [CBCentralManagerScanOptionAllowDuplicatesKey: true]
@@ -127,6 +133,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         let work = DispatchWorkItem { [weak self] in self?.finishScan() }
         scanTimer = work
         DispatchQueue.main.asyncAfter(deadline: .now() + scanSeconds, execute: work)
+    }
+
+    private func connectedBose() -> CBPeripheral? {
+        let known = central.retrieveConnectedPeripherals(withServices: [svcSig, svcApk])
+        return known.first(where: { isBose($0.name ?? "") }) ?? (known.count == 1 ? known[0] : nil)
     }
 
     private func finishScan() {
@@ -139,10 +150,8 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             connect(best.peripheral)
             return
         }
-        // 已经连在手机上（比如正在听歌）的耳机不会出现在扫描结果里
-        let known = central.retrieveConnectedPeripherals(withServices: [svcSig, svcApk])
-        if let device = known.first(where: { isBose($0.name ?? "") }) ?? (known.count == 1 ? known[0] : nil) {
-            connect(device)
+        if let ready = connectedBose() {
+            connect(ready)
             return
         }
         NSLog("BOSE scan timeout")

@@ -1,5 +1,9 @@
 import { fromHex, hasNative, nativeCall, toHex } from "./native.js";
 
+// 同时最多几条请求在途。耳机对同一条命令只回一个包，所以窗口不能开太大，
+// 4 条足够把一次启动里几十条独立读取压成几轮往返，又不至于灌满蓝牙写队列。
+const MAX_IN_FLIGHT = 4;
+
 // 只管「把字节送出去、把回包收回来」，具体怎么切包、怎么认出同一命令由 codec 决定：
 //   { id, filters, services, reset(), chunks(bytes, link), parse(chunk, link), key(packet), header(bytes) }
 export class HeadsetLink {
@@ -14,7 +18,9 @@ export class HeadsetLink {
     this.onPacket = null;
     this.onDisconnected = null;
     this.lastError = "";
-    this._gate = Promise.resolve();
+    this._queue = [];
+    this._inFlight = 0;
+    this._activeKeys = new Set();
     this._bindNative();
   }
 
@@ -201,20 +207,52 @@ export class HeadsetLink {
     }
   }
 
+  // 同一时刻最多几条请求在途。回包按命令号（fblock.func）配对，同一个命令同时只能有一条在途，
+  // 否则耳机乱序回包时会把结果配错；不同命令之间没有顺序要求，可以一起飞。
   request(packetBytes, timeoutMs = 2500) {
-    const run = () => this._requestOnce(packetBytes, timeoutMs);
-    const p = this._gate.then(run, run);
-    this._gate = p.then(
-      () => {},
-      () => {},
-    );
-    return p;
-  }
-
-  _requestOnce(packetBytes, timeoutMs) {
     const header = this.codec.header(packetBytes);
     if (!header) return Promise.reject(new Error("空数据包"));
     const key = this.codec.key(header);
+    return new Promise((resolve, reject) => {
+      this._queue.push({ packetBytes, timeoutMs, key, resolve, reject });
+      this._pump();
+    });
+  }
+
+  _pump() {
+    for (let i = 0; i < this._queue.length && this._inFlight < MAX_IN_FLIGHT; ) {
+      const job = this._queue[i];
+      if (this._activeKeys.has(job.key)) {
+        i += 1;
+        continue;
+      }
+      this._queue.splice(i, 1);
+      this._start(job);
+    }
+  }
+
+  _start(job) {
+    this._inFlight += 1;
+    this._activeKeys.add(job.key);
+    this._send(job).then(
+      (packet) => {
+        this._release(job.key);
+        job.resolve(packet);
+      },
+      (err) => {
+        this._release(job.key);
+        job.reject(err);
+      },
+    );
+  }
+
+  _release(key) {
+    this._inFlight -= 1;
+    this._activeKeys.delete(key);
+    this._pump();
+  }
+
+  _send({ packetBytes, timeoutMs, key }) {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         const list = this.pending.get(key) ?? [];
@@ -244,5 +282,9 @@ export class HeadsetLink {
       for (const item of list) item.reject(err);
     }
     this.pending.clear();
+    // 排队的请求不会再有回包，一起放掉
+    for (const job of this._queue.splice(0)) job.reject(err);
+    this._inFlight = 0;
+    this._activeKeys.clear();
   }
 }
