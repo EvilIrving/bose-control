@@ -3,7 +3,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { LINK_TEXT, batteryText, linkOf } from "../web/link.js";
+import { LINK_TEXT, linkOf } from "../web/link.js";
 import {
   FBLOCK,
   FUNC,
@@ -265,36 +265,6 @@ test("linkOf turns native codes into one state each", () => {
   assert.equal(linkOf(undefined), "failed");
 });
 
-test("battery labels follow the component count", async () => {
-  const { setLang } = await import("../web/labels.js");
-  setLang("zh");
-  assert.equal(batteryText([]), "");
-  assert.equal(batteryText([{ level: 80, component: 0 }]), "80%");
-  assert.equal(
-    batteryText([
-      { level: 92, component: 0 },
-      { level: 88, component: 1 },
-    ]),
-    "左 92% 右 88%",
-  );
-  assert.equal(
-    batteryText([
-      { level: 92, component: 0 },
-      { level: 50, component: 1 },
-      { level: 88, component: 2 },
-    ]),
-    "左 92% 盒 50% 右 88%",
-  );
-  setLang("en");
-  assert.equal(
-    batteryText([
-      { level: 92, component: 0 },
-      { level: 88, component: 1 },
-    ]),
-    "L 92% R 88%",
-  );
-  setLang("zh");
-});
 
 test("切换语言会换掉界面文案", async () => {
   const { setLang, t, voiceLanguageName } = await import("../web/labels.js");

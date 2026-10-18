@@ -96,3 +96,66 @@ test("断开时排队中的请求一起失败，不会留下悬着的 Promise", 
   await assert.rejects(queued, /蓝牙已断开/);
   for (const job of busy) await assert.rejects(job, /蓝牙已断开/);
 });
+
+// WKWebView 里 window.webkit 一定存在，早先按这个判成「老桥」，退回无参的 bleScan，
+// 带过去的设备和串口就丢了：设备中心里明明连着，点进去却报「没找到耳机」。
+test("WKWebView 里连接带上设备和串口，不走无参的 bleScan", async () => {
+  const calls = [];
+  globalThis.window = globalThis;
+  globalThis.NativeBLE = {
+    bleScan: () => calls.push({ name: "bleScan" }),
+    bleConnect: (payload) => calls.push({ name: "bleConnect", payload }),
+    sendData() {},
+    bleDisconnect() {},
+  };
+  globalThis.webkit = { messageHandlers: { bleScan: { postMessage() {} } } };
+  try {
+    const link = new HeadsetLink(codec);
+    const connecting = link.connect({
+      address: "c0-e5-79-2f-f9-89",
+      transport: "spp",
+      channels: [1, 2, 3],
+      services: ["0000079a-d102-11e1-9b23-00025b00a5a5"],
+    });
+    assert.equal(calls.length, 1, "只该发一条连接请求");
+    assert.equal(calls[0].name, "bleConnect");
+    const wants = JSON.parse(calls[0].payload);
+    assert.equal(wants.address, "c0-e5-79-2f-f9-89");
+    assert.equal(wants.transport, "spp");
+    assert.deepEqual(wants.channels, [1, 2, 3]);
+    // 品牌私有控制服务的 UUID 要传到原生端，由它去 SDP 里取端口号
+    assert.deepEqual(wants.services, ["0000079a-d102-11e1-9b23-00025b00a5a5"]);
+    window.onNativeConnected('{"name":"HUAWEI FreeClip 2","link":"spp"}');
+    await connecting;
+    assert.equal(link.connected, true);
+  } finally {
+    delete globalThis.NativeBLE;
+    delete globalThis.webkit;
+  }
+});
+
+// 界面上的「已连接」必须跟着 App 自己的会话走。原生端在开始连新设备时会先把旧通道断掉，
+// 但不会补一条 onNativeDisconnected；JS 这边要是留着上一台的 nativeOn 和设备名，
+// 就会「卡片写着已连接、标题还是上一台，其实什么也没连着」。
+test("换设备时先清掉上一台的连接状态和名字", async () => {
+  globalThis.window = globalThis;
+  globalThis.NativeBLE = { bleConnect() {}, sendData() {}, bleDisconnect() {} };
+  try {
+    const link = new HeadsetLink(codec);
+    const first = link.connect({ address: "c0-e5-79-2f-f9-89", transport: "spp" });
+    window.onNativeConnected('{"name":"HUAWEI FreeClip 2","link":"spp"}');
+    await first;
+    assert.equal(link.connected, true);
+    assert.equal(link.name, "HUAWEI FreeClip 2");
+
+    const second = link.connect({ address: "68-f2-1f-0d-94-89", transport: "spp" });
+    assert.equal(link.connected, false, "新一次连接开始时不能沿用上一台的连接状态");
+    assert.equal(link.name, "", "标题不能先显示上一台的名字");
+    // 连不上就直说连不上，别让按钮一直挂着「断开连接」
+    window.onNativeError("spp");
+    await assert.rejects(second);
+    assert.equal(link.connected, false, "连接失败之后不能说已连接");
+  } finally {
+    delete globalThis.NativeBLE;
+  }
+});

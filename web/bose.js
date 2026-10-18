@@ -69,17 +69,20 @@ const READ_TIMEOUT = 500;
 const RETRY_TIMEOUT = 1000;
 const DETAIL_TIMEOUT = 600;
 const WRITE_TIMEOUT = 2000;
-const MODE_ZH = {
-  Quiet: "安静",
-  Aware: "通透",
-  Immersion: "沉浸",
-  Cinema: "影院",
-  Transparent: "通透",
+// 耳机上报的模式名可能是英文（Quiet/Aware…），按当前界面语言给中文或英文；
+// 已经是中文的（设备语音语言为中文时）原样显示。
+const MODE_NAMES = {
+  Quiet: { zh: "安静", en: "Quiet" },
+  Aware: { zh: "通透", en: "Aware" },
+  Immersion: { zh: "沉浸", en: "Immersion" },
+  Cinema: { zh: "影院", en: "Cinema" },
+  Transparent: { zh: "通透", en: "Transparent" },
 };
 
 function modeLabel(mode) {
   const raw = (mode.name || "").trim();
-  return MODE_ZH[raw] || raw;
+  const known = MODE_NAMES[raw];
+  return known ? pick(known) : raw;
 }
 
 function usableModes() {

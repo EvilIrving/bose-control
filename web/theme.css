@@ -25,7 +25,8 @@ html:not([data-theme="shadcn"]) {
   --radius-sm: 999px;
   --radius-md: 999px;
   --radius-lg: 999px;
-  --radius-xl: 999px;
+  /* 设备列表卡片不跟着做成胶囊 */
+  --radius-xl: 1.15rem;
 
   /* 按钮/开关整体压矮一点 */
   --control: 2.5rem;
