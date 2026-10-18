@@ -30,6 +30,7 @@ export class BoseBle {
     this.pending = new Map();
     this.onPacket = null;
     this.onDisconnected = null;
+    this._gate = Promise.resolve();
     this._bindNative();
   }
 
@@ -180,6 +181,16 @@ export class BoseBle {
   }
 
   request(packetBytes, timeoutMs = 2500) {
+    const run = () => this._requestOnce(packetBytes, timeoutMs);
+    const p = this._gate.then(run, run);
+    this._gate = p.then(
+      () => {},
+      () => {},
+    );
+    return p;
+  }
+
+  _requestOnce(packetBytes, timeoutMs) {
     const header = decodeAll(packetBytes)[0];
     if (!header) return Promise.reject(new Error("空数据包"));
     const key = keyOf(header);

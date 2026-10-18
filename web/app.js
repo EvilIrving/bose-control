@@ -33,6 +33,7 @@ const ui = {
   status: $("status"),
   meta: $("meta"),
   go: $("go"),
+  goText: $("go-text"),
   controls: $("controls"),
   modes: $("modes"),
   cnc: $("cnc"),
@@ -72,6 +73,7 @@ const state = {
   name: "",
   battery: [],
   hasAudioSettings: false,
+  busy: false,
 };
 
 function log(line) {
@@ -99,8 +101,8 @@ function batteryText() {
     .join(" ");
 }
 
-async function ask(packet, label) {
-  const reply = await ble.request(packet);
+async function ask(packet, label, timeoutMs) {
+  const reply = await ble.request(packet, timeoutMs ?? 2500);
   if (reply.op === OP.ERROR) {
     const code = reply.payload[0] ?? reply.payload[1] ?? "?";
     throw new Error(`${label} ${code}`);
@@ -108,13 +110,18 @@ async function ask(packet, label) {
   return reply;
 }
 
-async function tryAsk(packet, label) {
+async function tryAsk(packet, label, timeoutMs) {
   try {
-    return await ask(packet, label);
+    return await ask(packet, label, timeoutMs);
   } catch (err) {
     log(err.message);
     return null;
   }
+}
+
+function pane(el, on) {
+  const box = el.closest("section") ?? el;
+  box.hidden = !on;
 }
 
 function chips(root, items, selected, onPick) {
@@ -132,8 +139,10 @@ function chips(root, items, selected, onPick) {
 }
 
 function renderModes() {
+  const modes = usableModes();
+  pane(ui.modes, modes.length > 0);
   ui.modes.innerHTML = "";
-  for (const mode of usableModes()) {
+  for (const mode of modes) {
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chip" + (mode.index === state.currentMode ? " on" : "");
@@ -155,18 +164,62 @@ function cncShown() {
   return 0;
 }
 
+function slider(row, { min, max, value, onChange }) {
+  const track = document.createElement("div");
+  track.className = "track";
+  const fill = document.createElement("i");
+  const num = document.createElement("b");
+  let current = value;
+  let held = false;
+  let sendAt = 0;
+  const paint = () => {
+    const t = (current - min) / Math.max(1, max - min);
+    fill.style.width = `${Math.max(0, Math.min(1, t)) * 100}%`;
+    num.textContent = String(current);
+  };
+  const send = () => {
+    sendAt = 0;
+    onChange(current);
+  };
+  const apply = (clientX) => {
+    const box = track.getBoundingClientRect();
+    const t = (clientX - box.left) / box.width;
+    current = Math.max(min, Math.min(max, Math.round(min + t * (max - min))));
+    paint();
+    if (!sendAt) sendAt = setTimeout(send, 80);
+  };
+  track.addEventListener("pointerdown", (ev) => {
+    held = true;
+    track.setPointerCapture(ev.pointerId);
+    apply(ev.clientX);
+  });
+  track.addEventListener("pointermove", (ev) => {
+    if (held) apply(ev.clientX);
+  });
+  const flush = () => {
+    held = false;
+    if (!sendAt) return;
+    clearTimeout(sendAt);
+    send();
+  };
+  track.addEventListener("pointerup", flush);
+  track.addEventListener("pointercancel", flush);
+  track.appendChild(fill);
+  paint();
+  row.append(track, num);
+}
+
 function renderCnc() {
-  const max = cncMax();
-  const shown = Math.min(cncShown(), max);
+  pane(ui.cnc, true);
   ui.cnc.innerHTML = "";
-  for (let i = 0; i <= max; i++) {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.textContent = String(i);
-    if (i === shown) btn.className = "on";
-    btn.addEventListener("click", () => setCnc(i));
-    ui.cnc.appendChild(btn);
-  }
+  ui.cnc.className = "band cnc-band";
+  const max = cncMax();
+  slider(ui.cnc, {
+    min: 0,
+    max,
+    value: Math.min(cncShown(), max),
+    onChange: setCnc,
+  });
 }
 
 function bandRow(band) {
@@ -174,56 +227,34 @@ function bandRow(band) {
   row.className = "band";
   const name = document.createElement("span");
   name.textContent = band.name;
-  const track = document.createElement("div");
-  track.className = "track";
-  const fill = document.createElement("i");
-  const num = document.createElement("b");
-  const paint = () => {
-    const t = (band.current - band.min) / Math.max(1, band.max - band.min);
-    fill.style.width = `${Math.max(0, Math.min(1, t)) * 100}%`;
-    num.textContent = String(band.current);
-  };
-  const apply = async (clientX) => {
-    const box = track.getBoundingClientRect();
-    const t = (clientX - box.left) / box.width;
-    const value = Math.round(band.min + t * (band.max - band.min));
-    band.current = Math.max(band.min, Math.min(band.max, value));
-    paint();
-    await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.EQ, eqPayload(band.current, band.id)), band.name);
-  };
-  track.addEventListener("pointerdown", (ev) => {
-    track.setPointerCapture(ev.pointerId);
-    apply(ev.clientX);
+  row.appendChild(name);
+  slider(row, {
+    min: band.min,
+    max: band.max,
+    value: band.current,
+    onChange: (value) => {
+      band.current = value;
+      tryAsk(setGet(FBLOCK.SETTINGS, FUNC.EQ, eqPayload(value, band.id)), band.name);
+    },
   });
-  track.addEventListener("pointermove", (ev) => {
-    if (ev.buttons) apply(ev.clientX);
-  });
-  track.appendChild(fill);
-  paint();
-  row.append(name, track, num);
   return row;
 }
 
 function renderEq() {
+  pane(ui.eq, state.eq.length > 0);
   ui.eq.innerHTML = "";
   for (const band of state.eq) ui.eq.appendChild(bandRow(band));
 }
 
 function renderSpatial() {
-  if (!state.hasAudioSettings) {
-    ui.spatial.hidden = true;
-    return;
-  }
-  ui.spatial.hidden = false;
+  pane(ui.spatial, state.hasAudioSettings);
+  if (!state.hasAudioSettings) return;
   chips(ui.spatial, SPATIAL_LABELS, state.cfg.spatial ?? 0, setSpatial);
 }
 
 function renderSidetone() {
-  if (state.sidetone == null) {
-    ui.sidetone.hidden = true;
-    return;
-  }
-  ui.sidetone.hidden = false;
+  pane(ui.sidetone, state.sidetone != null);
+  if (state.sidetone == null) return;
   chips(ui.sidetone, SIDETONE_LABELS, state.sidetone, setSidetone);
 }
 
@@ -234,8 +265,10 @@ function renderToggles() {
     { key: "mp", label: "双连", on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
     { key: "talk", label: "对话", on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
   ];
+  let n = 0;
   for (const item of items) {
     if (item.show === false) continue;
+    n += 1;
     const btn = document.createElement("button");
     btn.type = "button";
     btn.className = "chip" + (item.on ? " on" : "");
@@ -243,14 +276,12 @@ function renderToggles() {
     btn.addEventListener("click", item.run);
     ui.toggles.appendChild(btn);
   }
+  pane(ui.toggles, n > 0);
 }
 
 function renderStandby() {
-  if (state.standby == null) {
-    ui.standby.hidden = true;
-    return;
-  }
-  ui.standby.hidden = false;
+  pane(ui.standby, state.standby != null);
+  if (state.standby == null) return;
   chips(
     ui.standby,
     STANDBY.map((x) => ({ key: x.minutes, label: x.label })),
@@ -261,9 +292,12 @@ function renderStandby() {
 
 function renderAll() {
   const on = ble.connected;
+  const idle = !on;
+  document.body.classList.toggle("idle", idle);
   ui.controls.hidden = !on;
-  ui.go.textContent = on ? "断开" : "连接";
+  ui.go.classList.toggle("busy", state.busy && idle);
   ui.go.disabled = false;
+  ui.goText.textContent = on ? "断开" : "连接";
   if (!on) {
     ui.status.textContent = "";
     ui.meta.textContent = "";
@@ -281,58 +315,78 @@ function renderAll() {
 }
 
 async function loadDevice() {
-  await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init");
+  await tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", 1200);
 
-  const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称");
+  const nameReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.NAME), "名称", 1200);
   if (nameReply) state.name = parseName(nameReply.payload) || ble.name;
 
-  const batReply = await tryAsk(get(FBLOCK.STATUS, FUNC.BATTERY), "电量");
+  const batReply = await tryAsk(get(FBLOCK.STATUS, FUNC.BATTERY), "电量", 1200);
   if (batReply) state.battery = parseBattery(batReply.payload);
 
-  const eqReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡");
+  const eqReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.EQ), "均衡", 1200);
   if (eqReply) state.eq = parseEq(eqReply.payload);
 
-  const cncReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪");
-  if (cncReply) state.cnc = parseCnc(cncReply.payload);
-
-  const cfgReply = await tryAsk(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效");
+  const cfgReply = await tryAsk(get(FBLOCK.MODES, FUNC.AUDIO_SETTINGS), "音效", 1200);
   state.hasAudioSettings = false;
   if (cfgReply) {
     const cfg = parseAudioSettings(cfgReply.payload);
     if (cfg) {
       state.cfg = cfg;
       state.hasAudioSettings = true;
+      state.channel15 = false;
+      state.cnc = { steps: 11, step: cfg.cnc, total: 11, enabled: true };
     }
   }
 
-  const sideReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音");
+  const cncReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CNC), "降噪", 800);
+  if (cncReply) {
+    state.cnc = parseCnc(cncReply.payload);
+    if (state.hasAudioSettings && state.cfg.cnc != null) state.cnc.step = state.cfg.cnc;
+  }
+
+  renderAll();
+
+  const sideReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.SIDETONE), "侧音", 800);
   if (sideReply) state.sidetone = parseSidetone(sideReply.payload);
 
-  const mpReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连");
+  const mpReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.MULTIPOINT), "双连", 800);
   if (mpReply) state.multipoint = parseMultipoint(mpReply.payload);
 
-  const talkReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话");
+  const talkReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.CONVERSATION), "对话", 500);
   if (talkReply) state.conversation = parseConversation(talkReply.payload);
 
-  const autoReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机");
+  const autoReply = await tryAsk(get(FBLOCK.SETTINGS, FUNC.STANDBY), "关机", 500);
   if (autoReply) state.standby = parseStandby(autoReply.payload);
 
+  if (state.hasAudioSettings) {
+    const ok = await writeAudioSettings({ ...state.cfg });
+    log(ok ? "write-ok" : "write-fail");
+  }
+
+  renderAll();
   await loadModes();
   renderAll();
 }
 
 async function loadModes() {
   state.modes = [];
-  const current = await tryAsk(get(FBLOCK.MODES, FUNC.CURRENT_MODE), "当前");
+  const current = await tryAsk(get(FBLOCK.MODES, FUNC.CURRENT_MODE), "当前", 900);
   if (current?.payload.length) state.currentMode = current.payload[0];
-  const caps = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力");
+  const caps = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", 900);
   const parsed = caps ? parseModeCaps(caps.payload) : null;
   const n = Math.min(16, parsed ? parsed.bose + parsed.user || 8 : 8);
+  let miss = 0;
   for (let i = 0; i < n; i++) {
-    const reply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(i)), `m${i}`);
-    if (!reply) continue;
+    const reply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(i)), `m${i}`, 900);
+    if (!reply) {
+      miss += 1;
+      if (miss >= 2) break;
+      continue;
+    }
+    miss = 0;
     const mode = parseModeConfig(reply.payload);
     if (mode) state.modes.push(mode);
+    renderModes();
   }
   state.modes = usableModes();
 }
@@ -408,35 +462,38 @@ async function setStandby(minutes) {
 }
 
 async function setCnc(level) {
-  if (state.channel15 !== false) {
-    const reply = await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪");
-    if (reply) {
-      state.channel15 = true;
-      if (state.cnc) state.cnc.step = level;
-      else state.cnc = { steps: cncMax() + 1, step: level, total: cncMax() + 1, enabled: true };
-      renderCnc();
-      return;
+  if (state.hasAudioSettings || state.channel15 === false) {
+    if (!(await writeAudioSettings({ ...state.cfg, cnc: level, anc: true }))) return;
+  } else {
+    const reply = await tryAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪", 800);
+    if (reply) state.channel15 = true;
+    else {
+      state.channel15 = false;
+      if (!(await writeAudioSettings({ ...state.cfg, cnc: level, anc: true }))) return;
     }
-    state.channel15 = false;
   }
-  if (!(await writeAudioSettings({ ...state.cfg, cnc: level, anc: true }))) return;
   if (state.cnc) state.cnc.step = level;
   else state.cnc = { steps: cncMax() + 1, step: level, total: cncMax() + 1, enabled: true };
-  renderCnc();
+  state.cfg.cnc = level;
 }
 
 async function connect() {
-  ui.go.disabled = true;
+  if (state.busy) return;
+  state.busy = true;
+  renderAll();
   try {
     await ble.connect({ acceptAll: false });
+    ui.status.textContent = ble.name || "";
     await loadDevice();
   } catch (err) {
     log(err.message);
-    renderAll();
   }
+  state.busy = false;
+  renderAll();
 }
 
 ui.go.addEventListener("click", () => {
+  if (state.busy) return;
   if (ble.connected) {
     ble.disconnect();
     renderAll();
@@ -445,7 +502,11 @@ ui.go.addEventListener("click", () => {
   connect();
 });
 
-ble.onDisconnected = () => renderAll();
+ble.onDisconnected = () => {
+  state.busy = false;
+  renderAll();
+};
 
+window.__boseApp = true;
 if (!navigator.bluetooth && !hasNative()) ui.go.disabled = true;
-else renderAll();
+renderAll();
