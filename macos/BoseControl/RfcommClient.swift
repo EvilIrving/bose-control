@@ -10,6 +10,8 @@ protocol RfcommClientDelegate: AnyObject {
 
 final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
     weak var delegate: RfcommClientDelegate?
+    var target: String?
+    var channels: [BluetoothRFCOMMChannelID] = []
 
     private var device: IOBluetoothDevice?
     private var channel: IOBluetoothRFCOMMChannel?
@@ -20,18 +22,20 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
 
     var isOpen: Bool { channel?.isOpen() == true }
 
-    var hasConnectedBose: Bool {
-        boseDevices().contains { $0.isConnected() }
+    func isConnected(_ address: String) -> Bool {
+        paired().contains {
+            ($0.addressString ?? "").lowercased() == address.lowercased() && $0.isConnected()
+        }
     }
 
-    var hasPairedBose: Bool {
-        !boseDevices().isEmpty
+    var hasPairedDevice: Bool {
+        !paired().isEmpty
     }
 
     func connect() {
         disconnect()
         guard let device = preferredDevice() else {
-            delegate?.rfcommDidFail("没找到耳机：先在系统设置里配对 Bose")
+            delegate?.rfcommDidFail("没找到耳机：先在系统设置里配对蓝牙设备")
             return
         }
         self.device = device
@@ -146,12 +150,39 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             delegate?.rfcommDidFail("没找到耳机")
             return
         }
-        var ids: [BluetoothRFCOMMChannelID] = [2, 8]
+        channelQueue = channelCandidates(device)
+        openNextChannel()
+    }
+
+    // 华为的控制口是标准 SPP，名字叫 Serial Port，各家型号端口号不一样，
+    // 先按 SDP 里报的名字找，找不到再按最常见的 1 / 2 / 3 试。
+    // 不碰 SDP 里的其它 RFCOMM 口，那可能是免提通道，写进去会打断通话。
+    // 端口候选由页面按品牌给，这里只负责按顺序试；SDP 里名字像串口的插到最前面
+    private func channelCandidates(_ device: IOBluetoothDevice) -> [BluetoothRFCOMMChannelID] {
+        var ids: [BluetoothRFCOMMChannelID] = []
+        if let spp = serialChannel(device) {
+            ids.append(spp)
+        }
+        for id in channels where !ids.contains(id) {
+            ids.append(id)
+        }
         for id in discoveredChannels(device) where !ids.contains(id) {
             ids.append(id)
         }
-        channelQueue = ids
-        openNextChannel()
+        return ids
+    }
+
+    private func serialChannel(_ device: IOBluetoothDevice) -> BluetoothRFCOMMChannelID? {
+        guard let services = device.services as? [IOBluetoothSDPServiceRecord] else { return nil }
+        for record in services {
+            let name = (record.getServiceName() ?? "").lowercased()
+            guard name.contains("serial") || name.contains("com") else { continue }
+            var channelID: BluetoothRFCOMMChannelID = 0
+            if record.getRFCOMMChannelID(&channelID) == kIOReturnSuccess, channelID > 0 {
+                return channelID
+            }
+        }
+        return nil
     }
 
     private func openNextChannel() {
@@ -181,14 +212,15 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
     }
 
     private func preferredDevice() -> IOBluetoothDevice? {
-        let devices = boseDevices()
-        return devices.first { $0.isConnected() } ?? devices.first
+        if let target,
+           let hit = paired().first(where: { ($0.addressString ?? "").lowercased() == target.lowercased() }) {
+            return hit
+        }
+        return nil
     }
 
-    private func boseDevices() -> [IOBluetoothDevice] {
-        (IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []).filter {
-            NameMatch.isBose($0.name ?? "")
-        }
+    private func paired() -> [IOBluetoothDevice] {
+        IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []
     }
 
     private func discoveredChannels(_ device: IOBluetoothDevice) -> [BluetoothRFCOMMChannelID] {
@@ -225,6 +257,12 @@ enum NameMatch {
         return n.hasPrefix("bose") || n.hasPrefix("le-bose") || n.hasPrefix("qc") ||
             n.hasPrefix("quietcomfort") || n.hasPrefix("soundlink") || n.contains("bose")
     }
+
+    static func isHuawei(_ name: String) -> Bool {
+        let n = name.lowercased()
+        let keys = ["huawei", "freebuds", "freeclip", "freelace", "honor", "荣耀", "华为"]
+        return keys.contains { n.contains($0) }
+    }
 }
 
 enum HexBytes {
@@ -243,4 +281,43 @@ enum HexBytes {
     static func hex(_ data: Data) -> String {
         data.map { String(format: "%02x", $0) }.joined()
     }
+}
+
+// 设备中心的数据来源：系统里已经配对过的耳机，按品牌归类。
+// 只读，不开任何控制通道，所以可以随时调。
+enum HeadsetCatalog {
+    static func json() -> String {
+        let paired = IOBluetoothDevice.pairedDevices() as? [IOBluetoothDevice] ?? []
+        var rows: [[String: Any]] = []
+        for device in paired {
+            let name = device.name ?? ""
+            guard !name.isEmpty else { continue }
+            rows.append([
+                "name": name,
+                "address": device.addressString ?? "",
+                "connected": device.isConnected(),
+            ])
+        }
+        var seen = Set<String>()
+        rows = rows.filter { row in
+            let key = (row["name"] as? String ?? "").lowercased()
+            guard !key.isEmpty else { return true }
+            if seen.contains(key) { return false }
+            seen.insert(key)
+            return true
+        }
+        // 已连接的排前面，组内按名字自然顺序（不分大小写），保证每次刷新顺序都一样
+        rows.sort { lhs, rhs in
+            let l = lhs["connected"] as? Bool ?? false
+            let r = rhs["connected"] as? Bool ?? false
+            if l != r { return l }
+            let ln = lhs["name"] as? String ?? ""
+            let rn = rhs["name"] as? String ?? ""
+            return ln.localizedStandardCompare(rn) == .orderedAscending
+        }
+        guard let data = try? JSONSerialization.data(withJSONObject: rows),
+              let text = String(data: data, encoding: .utf8) else { return "[]" }
+        return text
+    }
+
 }

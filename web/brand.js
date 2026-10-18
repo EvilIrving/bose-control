@@ -1,24 +1,15 @@
-export const BRANDS = {
-  bose: { id: "bose", label: "Bose" },
-  huawei: { id: "huawei", label: "华为 HUAWEI" },
-};
+import { brandById, brandsHere } from "./brands.js";
 
 const STORAGE_KEY = "headset.brand";
 
-// 原生端用 window.NativeBLE.brands 声明自己认哪个品牌；浏览器里只有 Bose 的 Web Bluetooth。
-function nativeBrands() {
-  const list = globalThis.NativeBLE?.brands;
-  return Array.isArray(list) ? list : [];
-}
+// 运行时选中的品牌。原生注入的 NativeBrand 只是启动时的快照，
+// 从设备中心点了另一台耳机之后它不会跟着变，所以这里要单独记。
+let current = "";
 
 // 原生端在启动脚本里塞进来的上次选择；浏览器和 iOS/Android 端没有这个变量
 function nativeBrand() {
   const value = globalThis.NativeBrand;
   return typeof value === "string" ? value : "";
-}
-
-export function brandsHere() {
-  return [...new Set(["bose", ...nativeBrands()])].filter((id) => BRANDS[id]);
 }
 
 export function getBrand() {
@@ -28,11 +19,13 @@ export function getBrand() {
   } catch {
     /* storage 不可用时按默认品牌 */
   }
-  return [nativeBrand(), saved].find((id) => brandsHere().includes(id)) ?? "bose";
+  const here = brandsHere().map((brand) => brand.id);
+  return [current, nativeBrand(), saved].find((id) => here.includes(id)) ?? here[0] ?? "bose";
 }
 
 export function setBrand(id) {
-  if (!brandsHere().includes(id)) return;
+  if (!brandById(id)) return;
+  current = id;
   try {
     localStorage.setItem(STORAGE_KEY, id);
   } catch {

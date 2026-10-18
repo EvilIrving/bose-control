@@ -2,17 +2,32 @@
 
 [![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml)
 
-不登录、不联网，用蓝牙直接控制 Bose 耳机。
+不登录、不联网，用蓝牙直接控制 Bose 和华为耳机。
 
-官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，走 Bose 私有的 BMAP 协议改降噪、模式、均衡、侧音、双连这些设置，数据不出本机。
+官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，Bose 走私有的 BMAP 协议，华为走蓝牙串口（SPP），数据不出本机。
 
-- **网页版**：Chrome / Edge 的 Web Bluetooth，打开就能连
-- **App**：Android（BLE + RFCOMM）、iOS（BLE）、macOS（BLE + RFCOMM）
-- **按能力渲染**：不同 Bose 型号支持的功能不一样，耳机不回的功能整块隐藏，不会留一个空面板
+- **网页版**：Chrome / Edge 的 Web Bluetooth，打开就能连（只有 Bose）
+- **App**：macOS（BLE + RFCOMM）、Android（BLE + RFCOMM）、iOS（BLE）
+- **设备中心**：macOS 上首页就是设备中心，系统里配对过的耳机都列出来，点哪台控哪台
+- **按能力渲染**：耳机不回的功能整块隐藏，不会留一个空面板
 
-Controls Bose Bluetooth headphones over the BMAP protocol from the browser or a native app. No account, no cloud, no telemetry.
+Controls Bose headphones over BMAP and HUAWEI earbuds over SPP, from the browser or a native app. No account, no cloud, no telemetry.
 
 改 `web/` 之后跑 `scripts/sync-web.sh` 再编 App（Android / iOS / macOS 三端共用同一份页面）。
+
+## 界面
+
+三页，只有当前页可见可点：
+
+| 页面 | 内容 | 怎么进出 |
+| --- | --- | --- |
+| 设备中心（首页） | 已配对的耳机，每台一个方块：名字 / 品牌 / 已连接·电量 或 未连接。已连接的排前面，组内按名字自然序 | 启动就到，右上角 ↻ 重新枚举 |
+| 设备页 | 顶栏「名字 · 电量」＋各功能面板 | 点方块进；右上角小箭头返回，或按 `Esc` |
+| 设置页 | 语言，各品牌自己的配置项，已配对设备，耳机操作（断开连接等），诊断 | 设备页底部「设置」进，右上角「完成」出 |
+
+- 返回**不断开**：回到设备中心时那台设备仍连着、方块高亮并带电量，再点它就是回到控制页，不会重连。
+- 要真断开在设置页「耳机操作 → 断开连接」。
+- 设备中心只在能枚举系统配对设备的平台上出现（目前是 macOS）。浏览器 / iOS / Android 上首页是「品牌芯片 + 连接」的老样子。
 
 ## 电脑 Chrome
 
@@ -20,13 +35,15 @@ Controls Bose Bluetooth headphones over the BMAP protocol from the browser or a 
 python3 server.py
 ```
 
-打开打印出来的 `https://127.0.0.1:8443/`。
+打开打印出来的 `https://127.0.0.1:8443/`。只有 Bose：华为的控制通道是蓝牙串口，Web Bluetooth 只给 GATT。
 
 ## iOS
 
 `ios/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`，CoreBluetooth 连 FEBE。
 
 Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Team 后真机安装。审核按硬件配套工具交：备注型号，附一段连接改降噪的视频。
+
+华为在 iOS 上做不了：系统不把 SPP / RFCOMM 开放给第三方 App，这条不是没写，是写不了。
 
 ### 装到别人 iPhone 上（三条路）
 
@@ -54,17 +71,26 @@ xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 
 ## macOS
 
-`macos/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`。经典蓝牙已连上 Bose 时走 RFCOMM（channel 2，再试 8）；否则先 BLE GATT FEBE，失败再 RFCOMM。
+`macos/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`。
+
+启动就进设备中心：`IOBluetoothDevice.pairedDevices()` 里挑出名字像 Bose / 华为的，按「已连接 → 未连接、同组按名字」排好，交给页面渲染。点一台就连一台：
+
+- **Bose**：先看经典蓝牙是不是已经连着，连着直接开 RFCOMM（channel 2，再试 8，再试 SDP 里找到的）；没连就先 BLE GATT FEBE，失败再 RFCOMM。
+- **华为**：直接开 SPP。端口从 SDP 里按服务名（`Serial Port` / `Private COM`）取，取不到再试 1 / 2 / 3。不碰免提、A2DP 那些 RFCOMM 口，写进去会打断通话。
 
 ```bash
-xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configuration Release -destination 'platform=macOS'
+xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configuration Release -destination 'platform=macOS' -derivedDataPath macos/build
 ```
 
 产物 `macos/build/Build/Products/Release/BoseControl.app`。第一次打开需要蓝牙权限。
 
+品牌记在 `UserDefaults`（自定义 scheme 下 localStorage 只在本次会话有效），下次启动不会被带偏。
+
 ## Android（开源发 Release）
 
 `android/`。WebViewAssetLoader 加载 `assets/www/`。`NativeBLE`：BLE 先扫，没有再试已配对设备的 RFCOMM（`00000000-deca-fade-deca-deafdecacaff`）。
+
+目前只接了 Bose：设备中心和华为 SPP 都还没做（Android 的 RFCOMM 是能给第三方的，缺的是 `getBondedDevices()` 枚举 + SPP UUID 那一步）。
 
 权限：`BLUETOOTH_SCAN`、`BLUETOOTH_CONNECT`（12+）。Release 已开 `minifyEnabled` / `shrinkResources`。
 
@@ -98,14 +124,14 @@ adb logcat -s BOSE
 
 ## 传输
 
-| | BLE GATT | RFCOMM |
-| --- | --- | --- |
-| Chrome | 有 | 无 |
-| iOS App | 有 | 无（系统不给第三方） |
-| macOS App | 有 | 有 |
-| Android App | 有 | 有 |
+| | Bose（BLE GATT） | Bose（RFCOMM） | 华为（SPP） |
+| --- | --- | --- | --- |
+| Chrome | 有 | 无 | 无（Web Bluetooth 只给 GATT） |
+| iOS App | 有 | 无（系统不给第三方） | 无（同上） |
+| macOS App | 有 | 有 | 有 |
+| Android App | 有 | 有 | 还没接 |
 
-## 主页与设置页
+## Bose（BMAP）
 
 主页放每天要动的，设置页放配一次就不管的。
 
@@ -119,7 +145,7 @@ adb logcat -s BOSE
 | 其它：风噪滤除 / 多点连接 / 对话模式 | 触控控制 / 自动接听电话 / 自动播放暂停 |
 | 播放控制：上一曲 / 播放 / 暂停 / 下一曲 | 自动关机 |
 | | 已配对设备 |
-| | 耳机操作：进入配对 / 关机 |
+| | 耳机操作：进入配对 / 关机 / 断开连接 |
 
 ### 自定义模式
 
@@ -141,9 +167,100 @@ adb logcat -s BOSE
 
 `0x05/0x11` 只读，回的是一包姿态数据；写回要官方云端 CustomTune，本项目不写。写坏会让空间音频一直偏，得回官方 App 重新校准才能好。
 
+## 华为（HUAWEI）
+
+设备中心里出现的就是系统里配对过的华为耳机（名字含 `HUAWEI` / `FreeBuds` / `FreeClip` / `FreeLace` / `荣耀`），点一台就连一台；没有设备中心的平台上，首页是「品牌芯片 + 连接」，选 `华为 HUAWEI` 再连。
+
+| | 能不能用 |
+| --- | --- |
+| macOS App | 可以，经典蓝牙 SPP（RFCOMM） |
+| Chrome / Edge | 不行：华为的控制口是蓝牙串口，Web Bluetooth 只给 GATT |
+| iOS App | 不行（系统不给第三方 SPP） |
+| Android App | 还没接（`BmapBridge` 只认 Bose） |
+
+已验证机型：HUAWEI FreeClip 2（固件 HarmonyOS 6.0.0.256，型号 BTFT0027）。其他 FreeBuds / FreeClip 走同一套命令，没真机就不写死，能回包才显示。
+
+| 主页 | 设置页 |
+| --- | --- |
+| 均衡预设 | 语言 |
+| 低延迟 | 手势：双击 / 三击 / 长按（左右耳分开） / 滑动 |
+| 摘下暂停 | 语音语言 |
+| | 音质偏好（连接优先 / 音质优先） |
+| | 已配对设备 |
+| | 耳机操作：断开连接 |
+| | 诊断（型号、双耳序列号、双连接状态） |
+
+### 已配对设备
+
+设置页「已配对设备」列的是**耳机自己记住的对端**（Mac、手机这些），不是 Mac 上配对过的耳机。
+
+- 每台显示名字和状态：已连接 / —。
+- **连接 / 断开**：`2b33`，参数类型就是动作号（1 连、2 断、4 开自动连接、5 关自动连接），值是对端 MAC。
+- **自动连接**：同上，4 / 5。
+- **常用**：`2b32` 设首选设备。
+- 耳机那边一有变化就推 `2b36`，页面自动重新枚举；也可以点「刷新」。
+
+能不能连上取决于对端在不在、愿不愿意连，命令只负责发出去。在列表里对 Mac 自己点断开，会真的把这条链路断掉，App 回到设备中心。
+
+### 为什么有些块没有
+
+- **消噪**：只有耳机自己报了「降噪」这一档（`2b2a` 的位图里有 bit1）才渲染。FreeClip 2 会回 `2b2a`（正常 / 通透），但它是开放式耳机，参考实现 OpenFreebuds 也把它的 ANC 面板排除在外。
+- **双连接总开关**：`2b2e` 写 0/1 都回成功，但读回来一直是 1，耳机不接受这条路，所以只显示状态、不给开关。
+- **改名 / 关机 / 播放控制 / 自定义 EQ**：SPP 里没找到对应命令，不做。
+
+### 传输细节
+
+包格式和 CRC 见 `web/spp.js`：`5a | 长度(2 大端) | 00 | 命令(2) | [参数类型 1][长度 1][值]… | CRC16`，长度从 `00` 起算，整包 = 长度 + 5，CRC 是 XMODEM（多项式 0x1021）。
+
+`tests/spp.test.mjs` 里的每一帧都是 FreeClip 2 真机抓的，包括我们自己发的请求——编码出来的字节和当初耳机接受过的完全一致。
+
+命令表来自 [OpenFreebuds](https://github.com/melianmiko/OpenFreebuds) 的华为 SPP 驱动（Python，自带 FreeClip 2 型号支持），本项目只做了 JS 实现和界面。
+
+读的时候每条之间留 90ms 空隙，一轮读完再补一轮没读到的——这类耳机连续被问会闷掉，一次读全很容易只剩电量。
+
+### 连不上时
+
+- 安卓 / 浏览器的提示是「华为耳机要用 App」，因为那边没有 SPP 通道。
+- macOS 上没配对过会提示先配对；配对过但耳机在盒里、或刚被别的设备占着时，SPP 会话可能整个不响应，再点一次即可。
+
+## 加一个品牌
+
+宿主和原生端都不认品牌，加 VIVO / OPPO / 三星这类耳机时只动这两处：
+
+1. 新建 `web/<brand>.js`，导出 brand 描述符：
+
+```js
+export const vivoBrand = {
+  id: "vivo",
+  label: "vivo",
+  transport: "spp",        // "ble" 走 GATT，"spp" 走蓝牙串口
+  channels: [1, 2, 3],     // SPP 端口候选，SDP 里找到串口服务会插到最前面
+  matches: (name) => /vivo|iqoo/i.test(name),
+  codec: createVivoCodec,  // { reset, chunks, parse, key, header }，帧格式自己定
+  create: (ctx) => new VivoSession(ctx),
+};
+```
+
+2. 在 `web/brands.js` 的数组里加一行。
+
+`create(ctx)` 收到 `{ link, ui, state, refresh, log }`，返回的东西宿主只认四个入口：
+
+| 入口 | 作用 |
+| --- | --- |
+| `load()` | 连上后读全量状态，写进 `state`，返回「有没有读到东西」 |
+| `render()` | 把主页面板画出来（谁回包画谁） |
+| `renderSettings()` | 设置页里属于这个品牌的部分 |
+| `onPacket(packet)` | 主动上报（电量变化、模式切换、连接受理） |
+
+`codec` 负责帧层：`chunks(bytes, link)` 怎么切、`parse(chunk, link)` 怎么拼回包、`key(packet)` 用什么做请求/回应对应、`header(bytes)` 从请求字节里取出包头的 key。
+
+原生端（`macos/BoseControl`）不知道任何品牌：它只把系统里配对过的设备列表交给页面，连接时按页面给的 `transport` / `address` / `channels` 干活。所以加品牌不需要改 Swift。
+
 ## 兼容性
 
 页面不按型号写死开关，谁回包就显示谁：每个功能都是连上后单独 GET 一次，有回复才渲染那一块，没回复整块隐藏（连标题一起）。所以同一份代码可以覆盖 QC Ultra、QC45、NC700、earbuds 等不同能力集。
+
+Bose 走 BMAP，华为走 SPP，两边共用同一套页面和「谁回包就显示谁」的规则。
 
 | 区块 | 出现的条件 |
 | --- | --- |
@@ -171,4 +288,4 @@ adb logcat -s BOSE
 
 连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`请先连接耳机`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`设备不支持`、`请重新连接`。每条都在 10 字以内，保证窄屏单行不换行。
 
-已验证机型：Bose QuietComfort Ultra Headphones。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。
+已验证机型：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。

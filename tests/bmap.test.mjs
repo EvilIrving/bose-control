@@ -223,7 +223,8 @@ test("hint stays on one line on a narrow phone", () => {
   const css = readFileSync(join(dir, "../web/styles.css"), "utf8");
   assert.match(css.match(/#hint \{([^}]*)\}/)[1], /white-space: nowrap/);
   assert.match(css.match(/#hint \{([^}]*)\}/)[1], /min-height: 1\.4em/);
-  assert.match(css, /body\.idle #hint \{\s*display: block;/);
+  // 设备中心就是首页，提示一直挂在那一页上
+  assert.match(css.match(/#hint \{([^}]*)\}/)[1], /display: block/);
   for (const [key, text] of Object.entries(LINK_TEXT)) {
     assert.ok(text.zh.length <= 10, `中文提示太长 (${key}): ${text.zh}`);
     assert.ok(text.en.length <= 32, `英文提示太长 (${key}): ${text.en}`);
@@ -355,10 +356,12 @@ test("web files are a complete page", () => {
   assert.match(html, /id="spatial"/);
   assert.match(html, /id="sidetone"/);
   assert.match(html, /id="hint"/);
-  assert.match(html, /id="device-toggle"/);
+  assert.match(html, /id="device-trigger"/);
+  assert.match(html, /id="device-menu"/);
   assert.match(html, /id="diag"/);
   assert.match(html, /"noModule" in HTMLScriptElement\.prototype/);
-  assert.ok(html.indexOf('id="info"') < html.indexOf('<main'), "设备信息面板要在 header 与 main 之间");
+  assert.ok(html.indexOf('id="info"') > html.indexOf('id="settings"'), "设备信息卡在设置页");
+  assert.ok(html.indexOf('id="device-menu"') < html.indexOf('<main'), "设备下拉在顶栏里");
   assert.doesNotMatch(html, /fold-label/);
   assert.match(html, /app\.js/);
   assert.doesNotMatch(html, /不登录|本地控制|走 \[31\.10\]|刷新|其他/);

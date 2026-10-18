@@ -1,3 +1,4 @@
+import IOBluetooth
 import AppKit
 import SwiftUI
 import WebKit
@@ -49,6 +50,7 @@ struct WebScreen: NSViewControllerRepresentable {
 }
 
 final class WebController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate, BmapClientDelegate {
+    private let brandKey = "brand"
     private var web: WKWebView!
     private var assets: WebBundleHandler?
     private let bmap = BmapClient()
@@ -56,16 +58,24 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func loadView() {
         view = NSView(frame: NSRect(x: 0, y: 0, width: 980, height: 900))
         view.wantsLayer = true
-        view.layer?.backgroundColor = NSColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1).cgColor
+        view.layer?.backgroundColor = NSColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1).cgColor
     }
 
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "sendData", "bleDisconnect"] {
+        for name in ["bleScan", "sendData", "bleDisconnect", "setBrand", "listDevices"] {
             uc.add(self, name: name)
         }
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // 自定义 scheme 下 localStorage 只在本次会话里有效，品牌得由原生端记住，
+        // 否则下次启动又回到 Bose，自动连接会连错设备。
+        let stored = UserDefaults.standard.string(forKey: brandKey) ?? "bose"
+        uc.addUserScript(WKUserScript(
+            source: "window.NativeBrand = \"\(stored)\";",
+            injectionTime: .atDocumentStart,
+            forMainFrameOnly: true
+        ))
         let conf = WKWebViewConfiguration()
         conf.userContentController = uc
         conf.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -92,11 +102,21 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "bleScan":
-            bmap.scanAndConnect()
+            let body = message.body as? [String: Any]
+            let transport = body?["transport"] as? String ?? "ble"
+            let address = body?["address"] as? String
+            let channels = (body?["channels"] as? [Int] ?? []).map { BluetoothRFCOMMChannelID($0) }
+            bmap.scanAndConnect(transport: transport, address: address, channels: channels)
         case "sendData":
             if let hex = message.body as? String { bmap.send(hex: hex) }
         case "bleDisconnect":
             bmap.disconnect()
+        case "listDevices":
+            let payload = HeadsetCatalog.json()
+            NSLog("BOSE listDevices %@", payload)
+            js("onDeviceList('\(escape(payload))')")
+        case "setBrand":
+            if let id = message.body as? String { UserDefaults.standard.set(id, forKey: brandKey) }
         default:
             break
         }
@@ -120,9 +140,13 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
 
     private let nativeBridgeJS = """
     window.NativeBLE = {
-      bleScan: function () { window.webkit.messageHandlers.bleScan.postMessage({}); },
+      transports: ["ble", "spp"],
+      hub: true,
+      bleScan: function (payload) { window.webkit.messageHandlers.bleScan.postMessage(payload || {}); },
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
-      bleDisconnect: function () { window.webkit.messageHandlers.bleDisconnect.postMessage({}); }
+      bleDisconnect: function () { window.webkit.messageHandlers.bleDisconnect.postMessage({}); },
+      listDevices: function () { window.webkit.messageHandlers.listDevices.postMessage({}); },
+      setBrand: function (id) { window.webkit.messageHandlers.setBrand.postMessage(String(id)); }
     };
     """
 
@@ -135,6 +159,10 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     private func js(_ code: String) {
-        DispatchQueue.main.async { self.web.evaluateJavaScript(code, completionHandler: nil) }
+        DispatchQueue.main.async {
+            self.web.evaluateJavaScript(code) { _, error in
+                if let error { NSLog("BOSE js error %@", String(describing: error)) }
+            }
+        }
     }
 }

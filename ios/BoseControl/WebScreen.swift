@@ -55,7 +55,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
 
     override func viewDidLoad() {
         super.viewDidLoad()
-        view.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
+        view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
         for name in ["bleScan", "sendData", "bleDisconnect"] {
             uc.add(self, name: name)
@@ -72,11 +72,11 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         web.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         web.navigationDelegate = self
         web.isOpaque = false
-        web.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
-        web.underPageBackgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
+        web.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
+        web.underPageBackgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         web.allowsLinkPreview = false
         web.allowsBackForwardNavigationGestures = false
-        web.scrollView.backgroundColor = UIColor(red: 11.0 / 255, green: 11.0 / 255, blue: 11.0 / 255, alpha: 1)
+        web.scrollView.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         web.scrollView.contentInsetAdjustmentBehavior = .never
         web.scrollView.contentInset = .zero
         web.scrollView.delaysContentTouches = false

@@ -1,3 +1,4 @@
+import IOBluetooth
 import Foundation
 
 protocol BmapClientDelegate: AnyObject {
@@ -21,11 +22,20 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
         rfcomm.delegate = self
     }
 
-    func scanAndConnect() {
+    // 页面告诉我们用哪条路：ble（Bose 的 GATT）还是 spp（蓝牙串口），以及串口端口候选。
+    // 这里不认识品牌，加新品牌不用改这个文件。
+    func scanAndConnect(transport: String, address: String?, channels: [BluetoothRFCOMMChannelID]) {
         disconnect()
         reported = false
-        if rfcomm.hasConnectedBose {
-            NSLog("BOSE rfcomm first: classic already connected")
+        rfcomm.target = address
+        rfcomm.channels = channels
+        if transport == "spp" {
+            NSLog("BOSE spp connect %@", address ?? "-")
+            rfcomm.connect()
+            return
+        }
+        if let address, rfcomm.isConnected(address) {
+            NSLog("BOSE classic already connected, use rfcomm")
             rfcomm.connect()
             return
         }
@@ -57,7 +67,7 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
 
     func bleDidFail(_ message: String) {
         guard !reported else { return }
-        if rfcomm.hasPairedBose {
+        if rfcomm.hasPairedDevice {
             NSLog("BOSE ble fail, try rfcomm: %@", message)
             rfcomm.connect()
             return

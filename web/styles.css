@@ -1,11 +1,30 @@
+/* 设计令牌照 shadcn/ui 的 dark 主题（neutral）；oklch 值先换成了 hex，
+   因为 Chromium < 111 不认 oklch()，整个颜色会直接失效。 */
 :root {
   color-scheme: dark;
-  --bg: #0b0b0b;
-  --fg: #f4f4f4;
-  --dim: #7a7a7a;
-  --line: #2a2a2a;
-  --fill: #171717;
-  --on: #0b0b0b;
+  --background: #0a0a0a;
+  --foreground: #fafafa;
+  --card: #171717;
+  --popover: #171717;
+  --primary: #e5e5e5;
+  --primary-foreground: #171717;
+  --secondary: #262626;
+  --muted: #262626;
+  --muted-foreground: #a1a1a1;
+  --accent: #404040;
+  --accent-foreground: #fafafa;
+  --destructive: #ff6467;
+  --border: rgba(255, 255, 255, 0.1);
+  --input: rgba(255, 255, 255, 0.15);
+  --ring: #737373;
+  --hover: rgba(255, 255, 255, 0.06);
+  --radius: 0.625rem;
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --control: 2.75rem;
+  --shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
 }
 
 * {
@@ -28,9 +47,9 @@ html {
 html,
 body {
   margin: 0;
-  background: var(--bg);
-  color: var(--fg);
-  font: 16px/1.25 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  background: var(--background);
+  color: var(--foreground);
+  font: 16px/1.35 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -41,38 +60,195 @@ body {
 }
 
 body {
-  min-height: 100dvh;
-  padding-top: max(1rem, env(safe-area-inset-top));
-  padding-right: max(1rem, env(safe-area-inset-right));
-  padding-bottom: max(1.25rem, env(safe-area-inset-bottom));
-  padding-left: max(1rem, env(safe-area-inset-left));
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  overflow: hidden;
+}
+
+/* 页面栈：两页叠在一起，只有当前页可见可点，切页时左右各走一步 */
+#screen {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.screen-page {
+  position: absolute;
+  inset: 0;
+  overflow-x: hidden;
+  overflow-y: auto;
+  padding-top: max(1.25rem, env(safe-area-inset-top));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+  opacity: 0;
+  visibility: hidden;
+  pointer-events: none;
+  transition:
+    transform 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.26s ease,
+    visibility 0s linear 0.26s;
+  will-change: transform;
+}
+
+.screen-page.current {
+  transform: none;
+  opacity: 1;
+  visibility: visible;
+  pointer-events: auto;
+  transition:
+    transform 0.26s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.26s ease,
+    visibility 0s;
+}
+
+/* 被压在后面的列表页往左退一点，返回时再滑回来 */
+#page-devices:not(.current) {
+  transform: translateX(-22%);
+}
+
+#page-device:not(.current) {
+  transform: translateX(100%);
+}
+
+.list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.25rem;
+}
+
+.list-head h2 {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 0.95rem;
+  font-weight: 500;
+}
+
+#hub-refresh,
+#back {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--control);
+  height: var(--control);
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+#hub-refresh::before {
+  content: "↻";
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+#back {
+  grid-area: back;
+  color: var(--foreground);
+}
+
+#back::before {
+  content: "";
+  width: 0.45rem;
+  height: 0.45rem;
+  margin-left: 0.1rem;
+  border-left: 1.6px solid currentColor;
+  border-bottom: 1.6px solid currentColor;
+  transform: rotate(45deg);
+}
+
+button {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  min-height: var(--control);
+  padding: 0.5rem 1rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: inherit;
+  font-weight: 500;
+  touch-action: manipulation;
+  -webkit-user-select: none;
+  user-select: none;
+  transition:
+    background-color 0.14s ease,
+    border-color 0.14s ease,
+    color 0.14s ease;
+}
+
+button:focus {
+  outline: none;
+}
+
+button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+button:disabled {
+  opacity: 0.4;
 }
 
 header {
+  position: relative;
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
-  grid-template-areas: "head go";
-  column-gap: 0.75rem;
+  grid-template-areas: "head back";
+  column-gap: 0.6rem;
   align-items: center;
-  margin-bottom: 1.25rem;
+  margin-bottom: 1.5rem;
 }
 
 #head {
   grid-area: head;
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
   min-width: 0;
 }
 
 h1 {
-  flex: 0 100 auto;
-  min-width: 2.5rem;
   margin: 0;
-  font-size: 1.2rem;
-  font-weight: 650;
-  letter-spacing: -0.03em;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
   overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 顶栏的设备按钮：名字 + 电量 + 箭头，点开就是切换设备的下拉 */
+#device-trigger {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--control);
+  justify-content: flex-start;
+  padding: 0 0.7rem;
+  border-color: var(--border);
+  background: transparent;
+  color: var(--foreground);
+  text-align: left;
+}
+
+#device-trigger:hover {
+  background: var(--hover);
+}
+
+#status {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 1.05rem;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -80,39 +256,151 @@ h1 {
 #meta {
   flex: 0 1 auto;
   min-width: 0;
-  margin: 0;
   overflow: hidden;
-  color: var(--dim);
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
   font-variant-numeric: tabular-nums;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-#go {
-  grid-area: go;
-  align-self: center;
-  min-height: 2.75rem;
-  display: inline-flex;
+.chev {
+  flex: none;
+  width: 0.5rem;
+  height: 0.5rem;
+  margin-left: auto;
+  border-right: 1.5px solid var(--muted-foreground);
+  border-bottom: 1.5px solid var(--muted-foreground);
+  transform: rotate(45deg) translate(-0.1rem, -0.1rem);
+  transition: transform 0.15s ease;
+}
+
+#device-trigger[aria-expanded="true"] .chev {
+  transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
+}
+
+/* 下拉面板：shadcn 的 dropdown-menu 视觉，贴着顶栏往下展开 */
+.menu {
+  position: absolute;
+  z-index: 6;
+  top: calc(100% + 0.25rem);
+  left: 0;
+  right: 0;
+  display: none;
+  max-height: 60dvh;
+  overflow-y: auto;
+  padding: 0.3rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--popover);
+  box-shadow: var(--shadow);
+}
+
+.menu.open {
+  display: block;
+}
+
+.menu-group {
+  padding: 0.45rem 0.6rem 0.25rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+  font-weight: 500;
+}
+
+.menu-item {
+  display: flex;
   align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
+  gap: 0.6rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: 0 0.6rem;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--foreground);
+  font-weight: 500;
+  text-align: left;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.menu-item.danger {
+  color: var(--destructive);
+}
+
+.menu-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.menu-meta {
+  flex: none;
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+.menu-check {
+  flex: none;
+  width: 0.75rem;
+  height: 0.75rem;
+  margin-left: 0.1rem;
+}
+
+.menu-check.on::before {
+  content: "✓";
+  display: block;
+  color: var(--foreground);
+  font-size: 0.85rem;
+  font-style: normal;
+  line-height: 1;
+}
+
+.menu-sep {
+  height: 1px;
+  margin: 0.3rem 0;
+  background: var(--border);
+}
+
+.menu-empty {
+  margin: 0;
+  padding: 0.9rem 0.6rem;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
+}
+
+#go {
+  min-height: var(--control);
+  border-color: var(--border);
+  background: transparent;
+  color: var(--foreground);
 }
 
 .spin {
   display: none;
-  width: 1.15rem;
-  height: 1.15rem;
-  border: 2px solid rgba(11, 11, 11, 0.18);
-  border-top-color: var(--on);
+  width: 1.1rem;
+  height: 1.1rem;
+  border: 2px solid var(--border);
+  border-top-color: currentColor;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
 }
 
-#go.busy .spin {
+#go.busy .spin,
+#go-list.busy .spin {
   display: block;
 }
 
-#go.busy #go-text {
+#go.busy #go-text,
+#go-list.busy #go-list-text {
   display: none;
 }
 
@@ -122,69 +410,20 @@ h1 {
   }
 }
 
-body.idle header {
-  position: fixed;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  margin: 0;
-  padding: 0 1.5rem 16vh;
-  gap: 0.9rem;
-}
-
-body.idle #head {
-  display: none;
-}
-
-body.idle #go {
-  min-width: 9.5rem;
-  min-height: 3.4rem;
-  padding: 0.9rem 2rem;
-  font-size: 1.2rem;
+#go-list {
+  width: 100%;
+  min-height: 3.25rem;
+  font-size: 1.05rem;
 }
 
 #hint {
-  display: none;
-  margin: 0;
+  display: block;
+  margin: 1rem 0 0;
   min-height: 1.4em;
-  color: var(--dim);
-  font-size: 0.95rem;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
   line-height: 1.4;
   white-space: nowrap;
-}
-
-body.idle #hint {
-  display: block;
-}
-
-button {
-  appearance: none;
-  border: 0;
-  border-radius: 999px;
-  padding: 0.55rem 1rem;
-  background: #f4f4f4;
-  color: var(--on);
-  font: inherit;
-  font-weight: 600;
-  cursor: pointer;
-  touch-action: manipulation;
-  -webkit-user-select: none;
-  user-select: none;
-}
-
-button:focus {
-  outline: none;
-}
-
-button:focus-visible {
-  outline: 2px solid #f4f4f4;
-  outline-offset: 2px;
-}
-
-button:disabled {
-  opacity: 0.35;
 }
 
 .chips,
@@ -192,7 +431,7 @@ button:disabled {
 .row {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 
 .row {
@@ -200,133 +439,224 @@ button:disabled {
 }
 
 main > * + * {
-  margin-top: 1.1rem;
+  margin-top: 1.35rem;
 }
 
 section h2 {
-  margin: 0 0 0.45rem;
-  color: var(--dim);
-  font-size: 0.78rem;
-  font-weight: 600;
-  letter-spacing: 0.12em;
+  margin: 0 0 0.55rem;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 .chip,
 .levels button {
-  background: var(--fill);
-  color: var(--fg);
-  border: 1px solid var(--line);
+  min-height: var(--control);
+  padding: 0.5rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--foreground);
+  font-size: 0.95rem;
   font-weight: 500;
-  min-height: 2.75rem;
+  white-space: nowrap;
 }
 
-.chip.on,
-.levels button.on {
-  background: #f4f4f4;
-  color: var(--on);
-  border-color: #f4f4f4;
+.chip:hover {
+  background: var(--hover);
+}
+
+.chip.on {
+  border-color: transparent;
+  background: var(--primary);
+  color: var(--primary-foreground);
+}
+
+.chip.on:hover {
+  background: var(--primary);
+}
+
+.chip.arm {
+  border-color: var(--destructive);
+  background: transparent;
+  color: var(--destructive);
+}
+
+#modes .chip {
+  font-size: 0.9rem;
+}
+
+#modes.dense {
+  flex-wrap: nowrap;
+}
+
+#modes.dense .chip {
+  flex: none;
+  min-width: 0;
+  max-width: 7rem;
+  padding-left: 0.5rem;
+  padding-right: 0.5rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 分段控件：shadcn 的 tabs 视觉，轨道是 muted，选中项回到背景色 */
+.levels {
+  flex-wrap: nowrap;
+  gap: 0.25rem;
+  width: 100%;
+  padding: 0.25rem;
+  border-radius: var(--radius-md);
+  background: var(--muted);
 }
 
 .levels button {
-  min-width: 2.35rem;
-  padding: 0.55rem 0;
+  flex: 1;
+  min-width: 0;
+  min-height: calc(var(--control) - 0.5rem);
+  padding: 0 0.25rem;
+  border: 0;
+  background: transparent;
+  color: var(--muted-foreground);
+}
+
+.levels button.on {
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
 }
 
 .band {
   display: grid;
-  grid-template-columns: auto 1fr 2.2rem;
-  gap: 0.7rem;
+  grid-template-columns: auto minmax(0, 1fr) 2.4rem;
+  gap: 0.8rem;
   align-items: center;
-  margin-top: 0.75rem;
+}
+
+.band + .band {
+  margin-top: 0.5rem;
 }
 
 .band span {
   white-space: nowrap;
-}
-
-.band:first-child {
-  margin-top: 0;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
 }
 
 .cnc-band {
-  grid-template-columns: 1fr 2.2rem;
-  margin-top: 0;
+  grid-template-columns: minmax(0, 1fr) 2.4rem;
 }
 
 .track {
-  height: 2.75rem;
-  border-radius: 999px;
-  background: var(--fill);
-  border: 1px solid var(--line);
-  overflow: hidden;
+  display: flex;
+  align-items: center;
+  height: var(--control);
   touch-action: none;
-  cursor: pointer;
+}
+
+.track .rail {
+  position: relative;
+  flex: 1;
+  height: 0.375rem;
+  border-radius: 999px;
+  background: var(--muted);
 }
 
 .track i {
-  display: block;
-  height: 100%;
-  background: #f4f4f4;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 0;
   width: 0;
+  border-radius: 999px;
+  background: var(--primary);
+  pointer-events: none;
+}
+
+.track u {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 1rem;
+  height: 1rem;
+  margin-left: -0.5rem;
+  border: 2px solid var(--primary);
+  border-radius: 50%;
+  background: var(--background);
+  transform: translateY(-50%);
   pointer-events: none;
 }
 
 .band b {
+  color: var(--foreground);
   font-weight: 600;
+  font-size: 0.9rem;
   font-variant-numeric: tabular-nums;
   text-align: right;
 }
 
 #brand {
   justify-content: center;
+  margin-top: 0.9rem;
 }
 
-.gesture + .gesture {
-  margin-top: 0.85rem;
+#hub {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr));
+  gap: 0.75rem;
 }
 
-.gesture b {
-  display: block;
-  margin-bottom: 0.35rem;
-  color: var(--dim);
+.peer-card {
+  display: grid;
+  grid-template-rows: auto auto auto;
+  gap: 0.25rem;
+  align-content: start;
+  width: 100%;
+  min-height: 6.5rem;
+  padding: 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+  color: var(--foreground);
+  text-align: left;
+}
+
+.peer-card .peer-name {
+  font-weight: 600;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.peer-card i {
+  color: var(--muted-foreground);
+  font-size: 0.8rem;
+  font-style: normal;
+  font-weight: 400;
+}
+
+.peer-card b {
+  margin-top: auto;
+  padding-top: 0.4rem;
+  color: var(--muted-foreground);
   font-size: 0.85rem;
-  font-weight: 500;
+  font-weight: 400;
 }
 
-.chev {
-  flex: none;
-  width: 0.5rem;
-  height: 0.5rem;
-  border-right: 1.5px solid var(--dim);
-  border-bottom: 1.5px solid var(--dim);
-  transform: rotate(45deg) translate(-0.1rem, -0.1rem);
-  transition: transform 0.15s ease;
+.peer-card.active {
+  border-color: var(--ring);
 }
 
-#device-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 1.75rem;
-  height: 1.75rem;
-  padding: 0;
-  border-radius: 999px;
-  background: none;
-}
-
-#device-toggle[aria-expanded="true"] .chev {
-  transform: rotate(-135deg) translate(-0.1rem, -0.1rem);
-}
-
+/* 设置里的设备信息卡：左边标签，右边值，对齐官方 App 的排法 */
 #info {
   display: grid;
-  gap: 0.5rem;
-  margin: -0.5rem 0 1.1rem;
-  padding: 0.75rem 0.9rem;
-  background: var(--fill);
-  border: 1px solid var(--line);
-  border-radius: 0.9rem;
+  gap: 0.9rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
 }
 
 #info div {
@@ -338,29 +668,55 @@ section h2 {
 
 #info span {
   flex: none;
-  color: var(--dim);
-  font-size: 0.85rem;
+  color: var(--muted-foreground);
+  font-size: 0.9rem;
 }
 
 #info b {
-  font-weight: 500;
+  font-size: 0.95rem;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
   text-align: right;
   word-break: break-all;
+}
+
+.gesture + .gesture {
+  margin-top: 0.9rem;
+}
+
+.gesture b {
+  display: block;
+  margin-bottom: 0.4rem;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  font-weight: 500;
 }
 
 #settings {
   position: fixed;
   inset: 0;
   z-index: 10;
+  transform: translateX(100%);
+  visibility: hidden;
+  transition:
+    transform 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s linear 0.28s;
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none;
-  background: var(--bg);
-  padding-top: max(1rem, env(safe-area-inset-top));
-  padding-right: max(1rem, env(safe-area-inset-right));
-  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
-  padding-left: max(1rem, env(safe-area-inset-left));
+  background: var(--background);
+  padding-top: max(1.25rem, env(safe-area-inset-top));
+  padding-right: max(1.25rem, env(safe-area-inset-right));
+  padding-bottom: max(1.75rem, env(safe-area-inset-bottom));
+  padding-left: max(1.25rem, env(safe-area-inset-left));
+}
+
+#settings.open {
+  transform: none;
+  visibility: visible;
+  transition:
+    transform 0.28s cubic-bezier(0.32, 0.72, 0, 1),
+    visibility 0s;
 }
 
 #settings-head {
@@ -368,28 +724,38 @@ section h2 {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  margin-bottom: 1.4rem;
+  margin-bottom: 1.75rem;
+}
+
+#settings-head h1 {
+  font-size: 1.3rem;
+}
+
+#settings-close {
+  border-color: var(--border);
+  background: transparent;
+  color: var(--foreground);
 }
 
 #settings > section + section {
-  margin-top: 1.1rem;
+  margin-top: 1.6rem;
 }
 
 .field {
   display: flex;
   align-items: center;
-  gap: 0.4rem;
+  gap: 0.5rem;
 }
 
 input.text {
   flex: 1;
   min-width: 0;
-  min-height: 2.75rem;
-  padding: 0.55rem 1rem;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: var(--fill);
-  color: var(--fg);
+  min-height: var(--control);
+  padding: 0.5rem 0.85rem;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--foreground);
   font: inherit;
   font-weight: 500;
   -webkit-user-select: text;
@@ -397,28 +763,33 @@ input.text {
 }
 
 input.text:focus {
-  outline: none;
-  border-color: #f4f4f4;
-}
-
-.chip.arm {
-  background: #f4f4f4;
-  border-color: #f4f4f4;
-  color: var(--on);
+  outline: 2px solid var(--ring);
+  outline-offset: -1px;
 }
 
 #mode-editor > * + * {
-  margin-top: 0.6rem;
-}
-
-#mode-editor .band span {
-  color: var(--dim);
-  font-size: 0.85rem;
+  margin-top: 0.7rem;
 }
 
 #devices {
   display: grid;
+  gap: 0.6rem;
+}
+
+#devices .peer {
+  display: grid;
   gap: 0.5rem;
+  padding: 0.9rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-xl);
+  background: var(--card);
+}
+
+#devices .peer-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
 }
 
 #devices div {
@@ -435,9 +806,9 @@ input.text:focus {
 
 #devices b {
   flex: none;
-  color: var(--dim);
+  color: var(--muted-foreground);
   font-size: 0.85rem;
-  font-weight: 500;
+  font-weight: 400;
 }
 
 [hidden] {
@@ -445,61 +816,51 @@ input.text:focus {
 }
 
 @media (min-width: 900px) {
+  :root {
+    --control: 2.5rem;
+  }
+
   html {
     height: 100%;
     overflow: hidden;
   }
 
-  body {
-    height: 100%;
-    max-height: 100dvh;
-    overflow-x: hidden;
-    overflow-y: auto;
-    padding-top: max(1.5rem, env(safe-area-inset-top));
+  .screen-page {
+    padding-top: max(1.75rem, env(safe-area-inset-top));
     padding-right: max(2rem, env(safe-area-inset-right));
-    padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+    padding-bottom: max(1.75rem, env(safe-area-inset-bottom));
     padding-left: max(2rem, env(safe-area-inset-left));
   }
 
-  h1 {
-    font-size: 1.7rem;
+  #status {
+    font-size: 1.15rem;
+  }
+
+  #device-trigger {
+    max-width: 26rem;
+  }
+
+  .menu {
+    right: auto;
+    min-width: 22rem;
   }
 
   main {
     display: flex;
     flex-direction: column;
-    gap: 1.4rem;
+    gap: 1.5rem;
   }
 
   main > * + * {
     margin-top: 0;
   }
 
-  .levels {
-    flex-wrap: nowrap;
-  }
-
-  .levels button {
-    flex: 1;
-    min-width: 0;
-    padding: 0.75rem 0;
-    font-size: 1.05rem;
-  }
-
   .chip {
-    font-size: 1.05rem;
-    padding: 0.7rem 1.15rem;
+    font-size: 0.95rem;
+    padding: 0.5rem 1rem;
   }
 
-  .track {
-    height: 3rem;
-  }
-
-  .band {
-    grid-template-columns: auto 1fr 2.4rem;
-  }
-
-  .cnc-band {
-    grid-template-columns: 1fr 2.4rem;
+  #info {
+    max-width: 34rem;
   }
 }

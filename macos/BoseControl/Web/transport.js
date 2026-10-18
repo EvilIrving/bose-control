@@ -59,7 +59,7 @@ export class HeadsetLink {
     };
   }
 
-  async connect({ acceptAll = false } = {}) {
+  async connect({ acceptAll = false, address = null, transport = null, channels = [], services = [] } = {}) {
     this.codec.reset?.();
     if (hasNative()) {
       this.lastError = "";
@@ -87,9 +87,17 @@ export class HeadsetLink {
           },
         };
         try {
-          // 只有非默认品牌才把品牌传给原生端，老桥不认参数就不会被调到
-          if (this.codec.id === "bose") nativeCall("bleScan");
-          else nativeCall("bleScan", { brand: this.codec.id });
+          // 品牌、传输方式、串口候选都由调用方给，原生端不认识任何品牌
+          const wants = {
+            brand: this.codec.id,
+            transport: transport ?? (this.codec.ble ? "ble" : "spp"),
+            address: address ?? "",
+            channels,
+            services,
+          };
+          const plain = wants.transport === "ble" && !wants.address && !channels.length && !services.length;
+          if (plain) nativeCall("bleScan");
+          else nativeCall("bleScan", wants);
         } catch (err) {
           this._connectWait = null;
           clearTimeout(timer);

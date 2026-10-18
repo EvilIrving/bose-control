@@ -56,6 +56,8 @@ export const LABELS = {
   shortcut: { zh: "快捷动作", en: "Shortcut" },
   favorites: { zh: "机身模式循环", en: "Headset Mode Cycle" },
   devices: { zh: "已配对设备", en: "Paired Devices" },
+  deviceInfo: { zh: "设备信息", en: "Device Info" },
+  switchDevice: { zh: "切换设备", en: "Switch Device" },
   headset: { zh: "耳机操作", en: "Headset Actions" },
 
   diag: { zh: "诊断", en: "Diagnostics" },
@@ -130,6 +132,14 @@ export const LABELS = {
   sqQuality: { zh: "音质优先", en: "Quality First" },
   huaweiApp: { zh: "华为耳机要用 App", en: "Use the app for HUAWEI" },
   stateOn: { zh: "已开启", en: "On" },
+  autoConnect: { zh: "自动连接", en: "Auto Connect" },
+  preferred: { zh: "常用", en: "Preferred" },
+  playing: { zh: "正在播放", en: "Playing" },
+  refresh: { zh: "刷新", en: "Refresh" },
+  peers: { zh: "已配对数量", en: "Paired" },
+  notConnected: { zh: "未连接", en: "Not connected" },
+  devicesTitle: { zh: "设备", en: "Devices" },
+  back: { zh: "返回", en: "Back" },
   stateOff: { zh: "已关闭", en: "Off" },
 };
 

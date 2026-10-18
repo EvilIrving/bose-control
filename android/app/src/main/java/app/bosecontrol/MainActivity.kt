@@ -71,7 +71,7 @@ class MainActivity : ComponentActivity() {
             .build()
 
         web = WebView(this)
-        web.setBackgroundColor(Color.parseColor("#0b0b0b"))
+        web.setBackgroundColor(Color.parseColor("#0a0a0a"))
         web.overScrollMode = View.OVER_SCROLL_NEVER
         web.isLongClickable = false
         web.setOnLongClickListener { true }

@@ -28,12 +28,17 @@ const CMD = {
   voiceWrite: [0x0c, 0x01],
   dualRead: [0x2b, 0x2f],
   dualList: [0x2b, 0x31],
+  dualPrefer: [0x2b, 0x32],
+  dualCommand: [0x2b, 0x33],
   dualEvent: [0x2b, 0x36],
   inEar: [0x2b, 0x03],
 };
 
 const LEFT = 1;
 const RIGHT = 2;
+
+// 2b33 的用法：参数类型就是动作号，值是对端的 MAC
+const PEER = { connect: 1, disconnect: 2, autoOn: 4, autoOff: 5 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -115,7 +120,9 @@ export class HuaweiHeadset {
     return this.link.request(encode(cmd, params), timeout);
   }
 
-  read(cmd, types, timeout = 2500) {
+  async read(cmd, types, timeout = 2500) {
+    // 耳机连续被问会闷掉，给它留一口气
+    await sleep(90);
     return this.ask(cmd, types.map((type) => [type, EMPTY]), timeout);
   }
 
@@ -135,14 +142,23 @@ export class HuaweiHeadset {
     return this.tryRead(cmd, types, timeout * 2);
   }
 
+  // 一趟能读多少读多少；onlyMissing 只补上一趟没读到的
   async load() {
     this.reset();
-    const st = this.state;
-    st.name = this.link.name || "HUAWEI";
+    this.state.name = this.link.name || "HUAWEI";
+    await this.loadPass(false);
+    this.refresh();
+    await sleep(350);
+    await this.loadPass(true);
+    this.refresh();
+    return Boolean(this.info.model || this.battery || this.eq || this.anc);
+  }
 
-    const info = await this.probe(CMD.info, [...Array(32).keys()], 2000);
+  async loadPass(onlyMissing) {
+    const info = onlyMissing && this.info.model ? null : await this.probe(CMD.info, [...Array(32).keys()], 2000);
     if (info) this.readInfo(info);
 
+    const st = this.state;
     st.info = {
       productName: st.name,
       product: this.info.submodel ?? "",
@@ -155,32 +171,43 @@ export class HuaweiHeadset {
       rightSerial: this.info.right ?? "",
     };
 
-    const battery = await this.probe(CMD.battery, [1, 2, 3], 2000);
-    if (battery) this.readBattery(battery);
+    if (!onlyMissing || !this.battery) {
+      const battery = await this.probe(CMD.battery, [1, 2, 3], 2000);
+      if (battery) this.readBattery(battery);
+    }
 
-    const anc = await this.probe(CMD.ancRead, [1, 2]);
-    if (anc) this.readAnc(anc);
+    if (!onlyMissing || !this.anc) {
+      const anc = await this.probe(CMD.ancRead, [1, 2]);
+      if (anc) this.readAnc(anc);
+    }
 
-    const eq = await this.probe(CMD.eqRead, [1, 2, 3, 4, 5, 6, 7, 8]);
-    if (eq) this.readEq(eq);
+    if (!onlyMissing || !this.eq) {
+      const eq = await this.probe(CMD.eqRead, [1, 2, 3, 4, 5, 6, 7, 8]);
+      if (eq) this.readEq(eq);
+    }
 
-    const autoPause = await this.probe(CMD.autoPauseRead, [1]);
-    if (autoPause) this.autoPause = num(autoPause, 1) === 1;
+    if (!onlyMissing || this.autoPause == null) {
+      const autoPause = await this.probe(CMD.autoPauseRead, [1]);
+      if (autoPause) this.autoPause = num(autoPause, 1) === 1;
+    }
 
-    const lowLatency = await this.probe(CMD.lowLatency, [2]);
-    if (lowLatency) this.lowLatency = num(lowLatency, 2) === 1;
+    if (!onlyMissing || this.lowLatency == null) {
+      const lowLatency = await this.probe(CMD.lowLatency, [2]);
+      if (lowLatency) this.lowLatency = num(lowLatency, 2) === 1;
+    }
 
-    const quality = await this.probe(CMD.qualityRead, [1]);
-    if (quality) this.readQuality(quality);
+    if (!onlyMissing || this.quality == null) {
+      const quality = await this.probe(CMD.qualityRead, [1]);
+      if (quality) this.readQuality(quality);
+    }
 
-    const voice = await this.probe(CMD.voiceRead, [1, 2, 3]);
-    if (voice) this.readVoice(voice);
+    if (!onlyMissing || !this.voice) {
+      const voice = await this.probe(CMD.voiceRead, [1, 2, 3]);
+      if (voice) this.readVoice(voice);
+    }
 
-    await this.loadGestures();
-    await this.loadDual();
-
-    this.refresh();
-    return Boolean(this.info.model || this.battery || this.eq || this.anc);
+    if (!onlyMissing || !this.gestures) await this.loadGestures();
+    if (!onlyMissing || !this.dual) await this.loadDual();
   }
 
   readInfo(packet) {
@@ -202,6 +229,25 @@ export class HuaweiHeadset {
     }
   }
 
+  // 设备中心只想要电量，别把整套 load 跑一遍
+  async probeBattery() {
+    const reply = await this.tryRead(CMD.battery, [1, 2, 3], 2000);
+    return reply ? this.batteryRows(reply) : null;
+  }
+
+  batteryRows(packet) {
+    const parts = bytes(packet, 2);
+    if (parts.length === 3) {
+      return [
+        { component: 0, level: parts[0] },
+        { component: 1, level: parts[2] },
+        { component: 2, level: parts[1] },
+      ];
+    }
+    const level = num(packet, 1);
+    return level == null ? [] : [{ component: 0, level }];
+  }
+
   readBattery(packet) {
     const parts = bytes(packet, 2);
     const charging = bytes(packet, 3);
@@ -212,17 +258,8 @@ export class HuaweiHeadset {
       case: parts[2],
       charging: charging.length >= 3 ? charging.reduce((sum, v) => sum + (v === 1 ? 1 : 0), 0) : 0,
     };
-    const st = this.state;
-    if (parts.length === 3) {
-      // batteryText 认「左 / 盒 / 右」这个顺序
-      st.battery = [
-        { component: 0, level: parts[0] },
-        { component: 1, level: parts[2] },
-        { component: 2, level: parts[1] },
-      ];
-    } else {
-      st.battery = [{ component: 0, level: this.battery.global ?? 0 }];
-    }
+    // batteryText 认「左 / 盒 / 右」这个顺序
+    this.state.battery = this.batteryRows(packet);
   }
 
   readAnc(packet) {
@@ -289,11 +326,15 @@ export class HuaweiHeadset {
       if (!this.collecting) return;
       const mac = hexLookup(packet, 4);
       if (!mac) return;
+      const state = num(packet, 5) ?? 0;
       this.dual?.devices.push({
         index: num(packet, 3) ?? 0,
         mac,
         name: text(packet, 9),
-        connected: (num(packet, 5) ?? 0) > 0,
+        connected: state > 0,
+        playing: state === 9,
+        preferred: num(packet, 7) === 1,
+        autoConnect: num(packet, 8) === 1,
       });
       return;
     }
@@ -413,6 +454,40 @@ export class HuaweiHeadset {
     this.refresh();
   }
 
+  macBytes(mac) {
+    return Uint8Array.from(mac.split(":").map((part) => parseInt(part, 16)));
+  }
+
+  // 连接 / 断开 / 自动连接都是「发一条就走」，回包只有状态码，效果靠 2b36 事件和重新枚举确认
+  async peerCommand(kind, mac) {
+    try {
+      await this.link.write(encode(CMD.dualCommand, [[PEER[kind], this.macBytes(mac)]]));
+    } catch (err) {
+      this.log(err.message);
+      return;
+    }
+    await sleep(1500);
+    await this.loadDual();
+    this.refresh();
+  }
+
+  async preferPeer(mac) {
+    try {
+      await this.link.write(encode(CMD.dualPrefer, [[1, this.macBytes(mac)]]));
+    } catch (err) {
+      this.log(err.message);
+      return;
+    }
+    await sleep(1200);
+    await this.loadDual();
+    this.refresh();
+  }
+
+  async refreshPeers() {
+    await this.loadDual();
+    this.refresh();
+  }
+
   async setSwipe(code) {
     try {
       await this.ask(CMD.swipeWrite, [
@@ -484,7 +559,7 @@ export class HuaweiHeadset {
     pane(ui.rename, false);
     pane(ui.favorites, false);
     pane(ui.standby, false);
-    pane(ui.headset, false);
+    ui.headset.innerHTML = "";
     this.renderGestures();
     this.renderVoice();
     this.renderQuality();
@@ -506,7 +581,11 @@ export class HuaweiHeadset {
     if (g.double) rows.push(...this.tapRows(t("doubleTap"), g.double, CMD.doubleWrite));
     if (g.triple) rows.push(...this.tapRows(t("tripleTap"), g.triple, CMD.tripleWrite));
     if (g.long) rows.push(...this.tapRows(t("longPress"), g.long, CMD.longWrite));
-    if (g.swipe) rows.push(this.gestureRow(t("swipe"), this.swipeOptions(g.swipe), g.swipe.value, (code) => this.setSwipe(code)));
+    if (g.swipe) {
+      rows.push(
+        this.gestureRow(t("swipe"), this.swipeOptions(g.swipe), g.swipe.value, (code) => this.setSwipe(code), swipeActionName),
+      );
+    }
     for (const row of rows) box.appendChild(row);
     pane(box, rows.length > 0);
   }
@@ -589,12 +668,48 @@ export class HuaweiHeadset {
   renderDevices() {
     const ui = this.ui;
     const dual = this.dual;
-    pane(ui.devices, Boolean(dual?.devices.length));
-    if (!dual?.devices.length) return;
-    fillRows(
-      ui.devices,
-      dual.devices.map((device) => [device.name || device.mac, device.connected ? t("connected") : "—"]),
-    );
+    pane(ui.devices, Boolean(dual));
+    if (!dual) return;
+    ui.devices.innerHTML = "";
+
+    for (const device of dual.devices) {
+      const row = document.createElement("div");
+      row.className = "peer";
+
+      const head = document.createElement("div");
+      head.className = "peer-head";
+      const name = document.createElement("span");
+      name.textContent = device.name || device.mac;
+      const state = document.createElement("b");
+      state.textContent = device.playing ? t("playing") : device.connected ? t("connected") : "—";
+      head.append(name, state);
+
+      const acts = document.createElement("div");
+      acts.className = "chips";
+      const add = (label, on, run) => {
+        const btn = chip(label, on);
+        btn.addEventListener("click", run);
+        acts.appendChild(btn);
+        return btn;
+      };
+      if (device.connected) add(t("disconnect"), false, () => this.peerCommand("disconnect", device.mac));
+      else add(t("connect"), false, () => this.peerCommand("connect", device.mac));
+      add(t("autoConnect"), device.autoConnect, () =>
+        this.peerCommand(device.autoConnect ? "autoOff" : "autoOn", device.mac),
+      );
+      if (device.preferred) add(t("preferred"), true, () => this.refreshPeers());
+      else add(t("preferred"), false, () => this.preferPeer(device.mac));
+
+      row.append(head, acts);
+      ui.devices.appendChild(row);
+    }
+
+    const actions = document.createElement("div");
+    actions.className = "chips";
+    const refresh = chip(t("refresh"), false);
+    refresh.addEventListener("click", () => this.refreshPeers());
+    actions.appendChild(refresh);
+    ui.devices.appendChild(actions);
   }
 
   renderDiag() {
@@ -602,12 +717,24 @@ export class HuaweiHeadset {
     const rows = [
       [t("bridge"), this.link.nativeOn ? "OK" : "—"],
       [t("dualConnect"), this.dual ? t(this.dual.enabled ? "stateOn" : "stateOff") : "—"],
+      [t("peers"), String(this.dual?.devices.length ?? 0)],
     ];
     if (this.inEar != null) rows.push([t("inEar"), t(this.inEar ? "stateOn" : "stateOff")]);
-    if (this.info.model) rows.push([t("model"), this.info.model]);
-    if (this.info.left) rows.push([t("leftSerial"), this.info.left]);
-    if (this.info.right) rows.push([t("rightSerial"), this.info.right]);
     rows.push([t("lastError"), this.link.lastError || "—"]);
     fillRows(ui.diag, rows);
   }
 }
+
+export const huaweiBrand = {
+  id: "huawei",
+  label: "华为 HUAWEI",
+  // 控制走蓝牙串口，没有 GATT 通道
+  transport: "spp",
+  channels: [1, 2, 3],
+  matches: (name) => {
+    const n = String(name || "").toLowerCase();
+    return ["huawei", "freebuds", "freeclip", "freelace", "honor", "荣耀", "华为"].some((key) => n.includes(key));
+  },
+  codec: createHuaweiCodec,
+  create: (ctx) => new HuaweiHeadset(ctx),
+};
