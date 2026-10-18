@@ -166,6 +166,7 @@ function renderModes() {
   }
   if (free) {
     const btn = chip("＋", false);
+    btn.classList.add("plus");
     btn.setAttribute("aria-label", t("create"));
     btn.title = t("create");
     btn.addEventListener("click", () => openEditor(free.index));

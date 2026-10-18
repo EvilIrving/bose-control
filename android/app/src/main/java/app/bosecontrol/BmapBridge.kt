@@ -321,17 +321,20 @@ class BmapBridge(
         if (gatt == null) fail("connect")
     }
 
+    // 串口写必须按顺序，每次开一个线程会把两帧写岔，所以固定一个写线程排队
+    private val sppWriter = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     private fun write(bytes: ByteArray) {
         val socket = spp
         if (socket?.isConnected == true) {
-            Thread {
+            sppWriter.execute {
                 try {
                     socket.outputStream.write(bytes)
                     socket.outputStream.flush()
                 } catch (_: Exception) {
                     fail("write")
                 }
-            }.start()
+            }
             return
         }
         val ch = writeChar ?: return fail("write")
