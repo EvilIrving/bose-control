@@ -1,4 +1,12 @@
 .certs/
+ios/build/
+android/.gradle/
+android/app/build/
+android/build/
+.idea/
+*.iml
+.DS_Store
+
 
 # Node
 node_modules/
