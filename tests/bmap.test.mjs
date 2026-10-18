@@ -30,6 +30,7 @@ import {
   parseFirmware,
   parseMacAddress,
   parseManufactured,
+  parseModeCaps,
   parseProductId,
   productIdOf,
   parseModeConfig,
@@ -470,4 +471,29 @@ test("自定义模式与快捷键的容器都在页面里", () => {
   }
   assert.ok(html.indexOf('id="shortcut"') > html.indexOf('id="settings"'), "快捷键在设置页");
   assert.ok(html.indexOf('id="transport"') < html.indexOf('id="settings"'), "播放控制在主页");
+});
+
+test("QC Ultra 2 HP 真机回包：31.2 能力 04 07 00 00 00 7f 02", () => {
+  const caps = parseModeCaps(Uint8Array.of(0x04, 0x07, 0x00, 0x00, 0x00, 0x7f, 0x02));
+  assert.deepEqual(caps, { bose: 4, user: 7, flags: 0x7f });
+});
+
+test("QC Ultra 2 HP 真机回包：31.8 收藏 0b 00 07 是模式 0/1/2", () => {
+  assert.deepEqual(parseFavorites(Uint8Array.of(0x0b, 0x00, 0x07)), {
+    count: 11,
+    indices: [0, 1, 2],
+  });
+});
+
+test("QC Ultra 2 HP 真机回包：01.09 快捷动作只报 4 个可用项", () => {
+  const config = parseActionButton(
+    Uint8Array.of(0x80, 0x09, 0x13, 0x00, 0x09, 0x40, 0x02),
+  );
+  assert.deepEqual(config, {
+    buttonId: 128,
+    eventType: 9,
+    action: 19,
+    supported: [1, 14, 16, 19],
+    unavailable: [],
+  });
 });
