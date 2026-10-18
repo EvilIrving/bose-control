@@ -1,0 +1,69 @@
+name: apple
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  ios:
+    name: ios build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: web 资源必须已同步
+        run: |
+          sh scripts/sync-web.sh
+          if ! git diff --exit-code --stat; then
+            echo "::error::ios/macos 里的 Web 资源与 web/ 不一致，本地跑 scripts/sync-web.sh 后一起提交"
+            exit 1
+          fi
+
+      - name: xcodebuild (simulator, 无签名)
+        run: |
+          xcodebuild -project ios/BoseControl.xcodeproj -scheme BoseControl \
+            -configuration Release -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+
+      - name: app 里带上 web 页面了吗
+        run: |
+          test -f build/Build/Products/Release-iphonesimulator/BoseControl.app/Web/index.html
+          test -f build/Build/Products/Release-iphonesimulator/BoseControl.app/Web/app.js
+
+  macos:
+    name: macos build
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: web 资源必须已同步
+        run: |
+          sh scripts/sync-web.sh
+          if ! git diff --exit-code --stat; then
+            echo "::error::ios/macos 里的 Web 资源与 web/ 不一致，本地跑 scripts/sync-web.sh 后一起提交"
+            exit 1
+          fi
+
+      - name: xcodebuild
+        run: |
+          xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl \
+            -configuration Release -derivedDataPath build CODE_SIGNING_ALLOWED=NO build
+
+      - name: 打包 app
+        run: |
+          app=$(find build/Build/Products -maxdepth 2 -name "BoseControl.app" | head -1)
+          test -n "$app"
+          test -f "$app/Contents/Resources/Web/index.html"
+          ditto -c -k --keepParent "$app" bose-control-macos.zip
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: macos-app
+          path: bose-control-macos.zip
+          if-no-files-found: error

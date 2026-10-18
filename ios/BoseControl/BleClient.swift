@@ -19,6 +19,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     private var scanTimer: DispatchWorkItem?
     private var connectTimer: DispatchWorkItem?
     private var reported = false
+    private var writeQueue: [(Data, CBCharacteristic)] = []
 
     private let scanSeconds = 6.0
     private let connectSeconds = 12.0
@@ -52,10 +53,49 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func send(hex: String) {
-        guard let peripheral = target, let ch = writeChar else { return }
-        let type: CBCharacteristicWriteType =
-            ch.properties.contains(.writeWithoutResponse) ? .withoutResponse : .withResponse
-        peripheral.writeValue(hexToData(hex), for: ch, type: type)
+        guard let ch = writeChar else { return }
+        writeQueue.append((hexToData(hex), ch))
+        flushWrites()
+    }
+
+    /// CoreBluetooth 在 withoutResponse 缓冲满时会静默丢包，必须按 canSendWriteWithoutResponse 排队。
+    private func flushWrites() {
+        guard let peripheral = target, let (data, ch) = writeQueue.first else { return }
+        let useWithoutResponse = ch.properties.contains(.writeWithoutResponse)
+        if useWithoutResponse {
+            guard peripheral.canSendWriteWithoutResponse else { return }
+            let limit = peripheral.maximumWriteValueLength(for: .withoutResponse)
+            guard data.count <= limit else {
+                writeQueue.removeAll()
+                delegate?.bleDidFail("write")
+                return
+            }
+            writeQueue.removeFirst()
+            peripheral.writeValue(data, for: ch, type: .withoutResponse)
+            flushWrites()
+        } else {
+            let limit = peripheral.maximumWriteValueLength(for: .withResponse)
+            guard data.count <= limit else {
+                writeQueue.removeAll()
+                delegate?.bleDidFail("write")
+                return
+            }
+            writeQueue.removeFirst()
+            peripheral.writeValue(data, for: ch, type: .withResponse)
+        }
+    }
+
+    func peripheralIsReady(toSendWriteWithoutResponse peripheral: CBPeripheral) {
+        flushWrites()
+    }
+
+    func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if error != nil {
+            writeQueue.removeAll()
+            delegate?.bleDidFail("write")
+            return
+        }
+        flushWrites()
     }
 
     func disconnect() {
@@ -129,6 +169,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         target = nil
         writeChar = nil
         reported = false
+        writeQueue.removeAll()
     }
 
     private func cancelTimers() {
