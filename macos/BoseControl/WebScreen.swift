@@ -106,10 +106,24 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         var r = ev.reason;
         post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
       });
+      var reported = false;
+      function report(ok) {
+        if (reported) return;
+        reported = true;
+        post('appReady', { ok: ok });
+      }
+      // 主路径：load 之后 0.8 秒确认一次，模块没挂上就是没起来（不靠长定时器）
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (window.__boseApp === true) report(true);
+          else report(false);
+        }, 800);
+      });
+      // 兜底：load 一直不来的情况（资源卡住）也报
       var tries = 0;
       var timer = setInterval(function () {
-        if (window.__boseApp === true) { clearInterval(timer); post('appReady', { ok: true }); }
-        else if (++tries > 150) { clearInterval(timer); post('appReady', { ok: false }); }
+        if (window.__boseApp === true) { clearInterval(timer); report(true); }
+        else if (++tries > 150) { clearInterval(timer); report(false); }
       }, 100);
     })();
     """
@@ -199,7 +213,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
             ?? FileManager.default.temporaryDirectory
-        let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+        let unique = UUID().uuidString.prefix(8)
+        let url = dir.appendingPathComponent("bose-diag-\(stamp)-\(unique).txt")
         let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
         let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
 
@@ -209,7 +224,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
                 notify(ok, detail)
             } else {
                 let payload = reportJSON(ok: ok, path: ok ? url.path : "", bytes: ok ? full.utf8.count : 0,
-                                         error: ok ? nil : detail)
+                                         shareError: nil, error: ok ? nil : detail)
                 js("onDiagExported(\(payload))")
             }
         }
@@ -313,12 +328,13 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             .replacingOccurrences(of: "\r", with: " ")
     }
 
-    private func reportJSON(ok: Bool, path: String, bytes: Int, error: String?) -> String {
+    private func reportJSON(ok: Bool, path: String, bytes: Int, shareError: String?, error: String?) -> String {
         let payload: [String: Any] = [
             "ok": ok,
+            "saved": ok,
             "path": path,
             "bytes": bytes,
-            "error": error ?? "",
+            "error": shareError ?? error ?? "",
         ]
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"

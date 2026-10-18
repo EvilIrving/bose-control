@@ -261,8 +261,14 @@ class BmapBridge(
             perm.put("connect", if (api31) granted(Manifest.permission.BLUETOOTH_CONNECT) else "not-applicable")
             perm.put("fineLocation", granted(Manifest.permission.ACCESS_FINE_LOCATION))
             perm.put("coarseLocation", granted(Manifest.permission.ACCESS_COARSE_LOCATION))
-            perm.put("locationService", runCatching { activity.locationEnabled() }
-                .fold({ if (it) "on" else "off" }, { "unknown" }))
+            perm.put(
+                "locationService",
+                when (activity.locationEnabledOrNull()) {
+                    true -> "on"
+                    false -> "off"
+                    null -> "unknown"
+                },
+            )
             json.put("perm", perm)
         }
         if (errors.length() > 0) json.put("errors", errors)
@@ -288,12 +294,12 @@ class BmapBridge(
                 val root = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
                 val dir = File(root, "diagnostics").apply { mkdirs() }
                 val target = File(dir, name)
+                file = target // 先持有引用：写到一半抛异常时也要能删掉这个半成品
                 target.writeBytes(full.toByteArray())
                 if (!target.exists() || target.length() == 0L) {
                     runCatching { target.delete() }
                     error("写入后文件为空")
                 }
-                file = target
                 Diag.add("diag", "导出 → ${target.absolutePath}（${target.length()}B）")
                 null
             }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
@@ -301,7 +307,7 @@ class BmapBridge(
             if (reason != null) {
                 Diag.add("diag", "导出失败（$origin）：$reason")
                 runCatching { file?.takeIf { it.exists() }?.delete() }
-                notifyExport(origin, ok = false, file = null, error = reason)
+                notifyExport(origin, ok = false, file = null, shareError = null, error = reason)
                 return@post
             }
 
@@ -321,23 +327,26 @@ class BmapBridge(
                 // 文件已经写好，保留；只报告分享失败
                 Diag.add("diag", "分享失败（$origin）：$shareError；文件保留 ${target.absolutePath}")
             }
-            notifyExport(origin, ok = true, file = target, error = shareError)
+            notifyExport(origin, ok = true, file = target, shareError = shareError, error = null)
         }
     }
 
     /** 页面还活着就回调页面；页面挂了（错误横幅入口）就用 Toast 给用户看。 */
-    private fun notifyExport(origin: String, ok: Boolean, file: File?, error: String?) {
+    private fun notifyExport(origin: String, ok: Boolean, file: File?, shareError: String?, error: String?) {
+        // saved = 文件真的写好了；ok 只有「写好且分享出去」才为 true，
+        // shareError 单独回传，界面要能说「已保存但分享失败」
         val payload = org.json.JSONObject()
-            .put("ok", ok)
+            .put("ok", ok && shareError == null)
+            .put("saved", ok)
             .put("path", file?.absolutePath ?: "")
             .put("bytes", file?.length() ?: 0)
-            .put("error", error ?: "")
+            .put("error", shareError ?: error ?: "")
         if (origin == "page") {
             web.evaluateJavascript("onDiagExported(${payload})", null)
         } else {
             val text = when {
                 !ok -> "导出失败：${error ?: "未知原因"}"
-                error != null -> "已导出（分享未完成）：${file?.absolutePath}"
+                shareError != null -> "已保存，分享失败：${file?.absolutePath}（$shareError）"
                 else -> "已导出：${file?.absolutePath}"
             }
             android.widget.Toast.makeText(activity, text, android.widget.Toast.LENGTH_LONG).show()

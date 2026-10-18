@@ -68,7 +68,7 @@ import {
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
 import { logCount, logLine, logText } from "./log.js";
-import { btStateKey, exportResultText, locationKey } from "./diag.js";
+import { btStateKey, exportResult, locationKey } from "./diag.js";
 import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
@@ -170,9 +170,24 @@ function log(line, scope = "app") {
 
 // 原生导出的回执：成功/失败都要有反馈，设置页重绘之后结果还在
 let diagExport = null;
+
+function exportText(result) {
+  if (!result) return "";
+  const fill = (key) =>
+    t(key)
+      .replace("{path}", result.path || "?")
+      .replace("{bytes}", String(result.bytes ?? 0))
+      .replace("{error}", result.error || t("btUnknown"));
+  if (result.state === "saved") return fill("exportSaved");
+  if (result.state === "savedButShareFailed") return fill("exportShareFailed");
+  if (result.state === "unparsed") return t("exportUnparsed");
+  return fill("exportFailed");
+}
+
 window.onDiagExported = (info) => {
-  diagExport = exportResultText(info);
-  logLine(diagExport.ok ? "app" : "err", diagExport.text);
+  diagExport = exportResult(info);
+  const text = exportText(diagExport);
+  logLine(diagExport.state === "saved" ? "app" : "err", text);
   let note = document.getElementById("diag-export-state");
   if (!note && ui.diagActions) {
     note = document.createElement("span");
@@ -180,7 +195,7 @@ window.onDiagExported = (info) => {
     note.className = "diag-note";
     ui.diagActions.appendChild(note);
   }
-  if (note) note.textContent = diagExport.text;
+  if (note) note.textContent = text;
 };
 
 // 页面上任何地方崩了都要留下痕迹，不然只有一行"点不动"可看
@@ -326,7 +341,7 @@ function renderDiag() {
       const note = document.createElement("span");
       note.id = "diag-export-state";
       note.className = "diag-note";
-      note.textContent = diagExport.text;
+      note.textContent = exportText(diagExport);
       ui.diagActions.appendChild(note);
     }
   }

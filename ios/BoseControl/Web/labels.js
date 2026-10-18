@@ -78,6 +78,10 @@ export const LABELS = {
   btUnknown: { zh: "未知", en: "Unknown" },
   lastError: { zh: "上次错误", en: "Last error" },
   exportDiag: { zh: "导出诊断", en: "Export diagnostics" },
+  exportSaved: { zh: "已导出：{path}（{bytes}B）", en: "Saved: {path} ({bytes}B)" },
+  exportShareFailed: { zh: "已保存但分享失败：{path}（{error}）", en: "Saved but share failed: {path} ({error})" },
+  exportFailed: { zh: "导出失败：{error}", en: "Export failed: {error}" },
+  exportUnparsed: { zh: "导出结果解析失败", en: "Could not read export result" },
   location: { zh: "定位", en: "Location" },
 
   create: { zh: "新建模式", en: "New Mode" },

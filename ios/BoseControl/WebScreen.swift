@@ -95,10 +95,22 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         var r = ev.reason;
         post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
       });
+      var reported = false;
+      function report(ok) {
+        if (reported) return;
+        reported = true;
+        post('appReady', { ok: ok });
+      }
+      window.addEventListener('load', function () {
+        setTimeout(function () {
+          if (window.__boseApp === true) report(true);
+          else report(false);
+        }, 800);
+      });
       var tries = 0;
       var timer = setInterval(function () {
-        if (window.__boseApp === true) { clearInterval(timer); post('appReady', { ok: true }); }
-        else if (++tries > 150) { clearInterval(timer); post('appReady', { ok: false }); }
+        if (window.__boseApp === true) { clearInterval(timer); report(true); }
+        else if (++tries > 150) { clearInterval(timer); report(false); }
       }, 100);
     })();
     """
@@ -193,40 +205,42 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     /// 唯一导出实现：pageText 为 nil 表示页面不可用（原生故障入口）。
+    /// 两种来源都真的把文件交出去；notify 只决定结果从哪个渠道告诉用户。
     private func exportDiagnostics(pageText: String?, reason: String, notify: ((Bool, String) -> Void)?) {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
-        let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+        let unique = UUID().uuidString.prefix(8)
+        let url = dir.appendingPathComponent("bose-diag-\(stamp)-\(unique).txt")
         let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
         let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
 
-        func finish(_ ok: Bool, _ detail: String) {
-            Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)")
-            if let notify {
-                notify(ok, detail)
-                return
-            }
-            let payload = reportJSON(ok: ok, path: ok ? url.path : "", bytes: ok ? full.utf8.count : 0,
-                                     error: ok ? nil : detail)
-            js("onDiagExported(\(payload))")
-        }
-
         do {
             try full.write(to: url, atomically: true, encoding: .utf8)
-            if notify == nil {
-                let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
-                if let pop = share.popoverPresentationController {
-                    pop.sourceView = view
-                    pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
-                    pop.permittedArrowDirections = []
-                }
-                present(share, animated: true)
-            }
-            finish(true, url.path)
         } catch {
             let ns = error as NSError
-            finish(false, "\(ns.domain)/\(ns.code): \(ns.localizedDescription)")
+            let detail = "\(ns.domain)/\(ns.code): \(ns.localizedDescription)"
+            Diag.fail("导出诊断失败：\(detail)")
+            if let notify { notify(false, detail) }
+            else { js("onDiagExported(\(reportJSON(ok: false, path: "", bytes: 0, shareError: nil, error: detail)))") }
+            return
         }
+
+        Diag.log("导出诊断 → \(url.lastPathComponent)（\(full.utf8.count)B）")
+        let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+        if let pop = share.popoverPresentationController {
+            pop.sourceView = view
+            pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+            pop.permittedArrowDirections = []
+        }
+        if let notify {
+            share.completionWithItemsHandler = { _, completed, _, error in
+                let detail = error.map { "\(($0 as NSError).domain)/\(($0 as NSError).code): \($0.localizedDescription)" }
+                notify(true, detail ?? (completed ? url.path : url.path))
+            }
+        } else {
+            js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, shareError: nil, error: nil)))")
+        }
+        present(share, animated: true)
     }
 
     private func lockGestures() {
@@ -288,12 +302,13 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         }
     }
 
-    private func reportJSON(ok: Bool, path: String, bytes: Int, error: String?) -> String {
+    private func reportJSON(ok: Bool, path: String, bytes: Int, shareError: String?, error: String?) -> String {
         let payload: [String: Any] = [
             "ok": ok,
+            "saved": ok,
             "path": path,
             "bytes": bytes,
-            "error": error ?? "",
+            "error": shareError ?? error ?? "",
         ]
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
