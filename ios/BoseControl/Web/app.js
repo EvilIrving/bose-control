@@ -757,7 +757,9 @@ async function loadModes() {
   const capsReply = await tryAsk(get(FBLOCK.MODES, FUNC.MODE_CAPS), "能力", 900);
   const caps = capsReply ? parseModeCaps(capsReply.payload) : null;
   const builtin = caps?.bose ?? 0;
-  const userReply = await tryAsk(get(FBLOCK.MODES, FUNC.USER_INDICES), "用户模式", 900);
+  const userReply = caps?.user
+    ? null
+    : await tryAsk(get(FBLOCK.MODES, FUNC.USER_INDICES), "用户模式", 900);
   const users = userReply?.payload.length
     ? [...userReply.payload]
     : Array.from({ length: caps?.user ?? 0 }, (_, i) => builtin + i);
