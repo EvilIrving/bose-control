@@ -26,6 +26,9 @@ html:not([data-theme="shadcn"]) {
   --radius-md: 999px;
   --radius-lg: 999px;
   --radius-xl: 999px;
+
+  /* 按钮/开关整体压矮一点 */
+  --control: 2.5rem;
 }
 
 html:not([data-theme="shadcn"]) section h2 {
@@ -37,9 +40,17 @@ html:not([data-theme="shadcn"]) section h2 {
 html:not([data-theme="shadcn"]) .chip,
 html:not([data-theme="shadcn"]) .levels button {
   border: 1px solid var(--line);
-  border-radius: 999px;
+  border-radius: 0.8rem;
   background: var(--fill);
   color: var(--fg);
+  padding-left: 0.95rem;
+  padding-right: 0.95rem;
+}
+
+/* 模式行：再宽一点，留出两字标签的呼吸位 */
+html:not([data-theme="shadcn"]) #modes .chip {
+  padding-left: 0.85rem;
+  padding-right: 0.85rem;
 }
 
 html:not([data-theme="shadcn"]) .chip:hover {
@@ -65,7 +76,11 @@ html:not([data-theme="shadcn"]) #device-trigger {
   padding-right: 0;
 }
 
-/* 滑轨：经典版是整条白底，没有圆点 */
+/* 滑轨：经典版是整条白底，没有圆点，高度压薄一档 */
+html:not([data-theme="shadcn"]) .track {
+  height: 2.25rem;
+}
+
 html:not([data-theme="shadcn"]) .track .rail {
   height: 100%;
   background: var(--fill);

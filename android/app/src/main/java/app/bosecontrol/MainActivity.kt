@@ -29,7 +29,8 @@ class MainActivity : ComponentActivity() {
     private lateinit var bridge: BmapBridge
     private lateinit var banner: TextView
 
-    private var pendingScan = false
+    private var pending: (() -> Unit)? = null
+    private var pendingAction: (() -> Unit)? = null
     private var lastJsError = ""
 
     // vivo / OPPO / 小米 等 ROM 会把 BLE 扫描额外挂在「定位」上，12+ 也要定位权限
@@ -57,8 +58,14 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
         // 有的 ROM 会回一个空的 map，values.all{} 对空 map 恒为 true，必须按 key 查
-        if (btPermissions.all { granted[it] == true }) bridge.scanInternal()
-        else bridge.fail("permission")
+        if (btPermissions.all { granted[it] == true }) {
+            val action = pendingAction ?: { bridge.scanInternal() }
+            pendingAction = null
+            action()
+        } else {
+            pendingAction = null
+            bridge.fail("permission")
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -167,26 +174,34 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    fun requestBtThenScan() {
-        val perms = btPermissions
-        val missing = perms.filter { checkSelfPermission(it) != PackageManager.PERMISSION_GRANTED }
-        if (missing.isEmpty()) {
-            bridge.scanInternal()
+    fun hasBtPermission(): Boolean =
+        btPermissions.all { checkSelfPermission(it) == PackageManager.PERMISSION_GRANTED }
+
+    /** 统一入口：有权限就直接干，没有就先申请。冷启动时挂起，onResume 再弹。 */
+    fun requestBtPermission(then: () -> Unit) {
+        if (hasBtPermission()) {
+            then()
             return
         }
         // 冷启动时 activity 还没到 RESUMED，这时 launch 可能被系统丢掉，等 onResume 再弹
         if (!lifecycle.currentState.isAtLeast(androidx.lifecycle.Lifecycle.State.RESUMED)) {
-            pendingScan = true
+            pending = then
             return
         }
-        ask.launch(perms)
+        pendingAction = then
+        ask.launch(btPermissions)
+    }
+
+    fun requestBtThenScan() {
+        requestBtPermission { bridge.scanInternal() }
     }
 
     override fun onResume() {
         super.onResume()
-        if (pendingScan) {
-            pendingScan = false
-            requestBtThenScan()
+        val action = pending
+        if (action != null) {
+            pending = null
+            requestBtPermission(action)
         }
     }
 

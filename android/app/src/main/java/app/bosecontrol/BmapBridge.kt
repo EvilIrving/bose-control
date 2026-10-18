@@ -68,6 +68,11 @@ class BmapBridge(
     /** 已配对设备列表，页面自己做品牌归类。 */
     @JavascriptInterface
     fun listDevices() {
+        // 12+ 读 bondedDevices 要 BLUETOOTH_CONNECT，没有就先申请，拿到再回一次
+        if (!activity.hasBtPermission()) {
+            main.post { activity.requestBtPermission { listDevices() } }
+            return
+        }
         val ad = adapter
         if (ad == null) {
             js("onDeviceList('[]')")
