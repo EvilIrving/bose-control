@@ -1,12 +1,4 @@
 .certs/
-ios/build/
-android/.gradle/
-android/app/build/
-android/build/
-.idea/
-*.iml
-.DS_Store
-
 
 # Node
 node_modules/
@@ -20,8 +12,10 @@ local.properties
 captures/
 .externalNativeBuild/
 .cxx/
-*.iml
+
+# IDE
 .idea/
+*.iml
 
 # Python
 __pycache__/
