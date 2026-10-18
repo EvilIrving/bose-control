@@ -32,11 +32,22 @@ enum Diag {
         return buffer.joined(separator: "\n")
     }
 
+    static var centralState = "-"
+
     static func systemInfo() -> String {
         let info = Bundle.main.infoDictionary ?? [:]
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
-        return "iOS \(UIDevice.current.systemVersion) / \(UIDevice.current.model) / app \(version)(\(build))"
+        let auth: String
+        switch CBManager.authorization {
+        case .allowedAlways: auth = "allowed"
+        case .denied: auth = "denied"
+        case .restricted: auth = "restricted"
+        case .notDetermined: auth = "undetermined"
+        @unknown default: auth = "unknown"
+        }
+        return "iOS \(UIDevice.current.systemVersion) / \(UIDevice.current.model) / app \(version)(\(build))" +
+            " / central=\(centralState) auth=\(auth)"
     }
 
     private static func remember(_ text: String) {
@@ -145,6 +156,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
+        if let error { Diag.fail("写失败 \(error.localizedDescription)") }
         guard peripheral === target else { return }
         writing = false
         if error != nil {
@@ -279,6 +291,8 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        Diag.centralState = stateCode
+        Diag.log("central state=\(stateCode)")
         guard wantScan else { return }
         if central.state == .poweredOn {
             startScan()
@@ -338,6 +352,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === target else { return }
+        if let error { Diag.fail("discoverServices 失败 \(error.localizedDescription)") }
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
             Diag.fail("没有 FEBE 服务（\(peripheral.services?.count ?? 0) 个服务）")
             central.cancelPeripheralConnection(peripheral)
@@ -354,6 +369,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         error: Error?
     ) {
         guard peripheral === target else { return }
+        if let error { Diag.fail("discoverCharacteristics 失败 \(error.localizedDescription)") }
         let chars = service.characteristics ?? []
         let ch = chars.first { $0.uuid == charSecure }
             ?? chars.first { $0.uuid == charPlain }
@@ -391,6 +407,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        if let error { Diag.fail("读取失败 \(error.localizedDescription)") }
         guard peripheral === target, characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }

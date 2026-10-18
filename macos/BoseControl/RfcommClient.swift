@@ -1,3 +1,4 @@
+import CoreBluetooth
 import Foundation
 import IOBluetooth
 import os
@@ -343,8 +344,22 @@ enum Diag {
         let version = info["CFBundleShortVersionString"] as? String ?? "?"
         let build = info["CFBundleVersion"] as? String ?? "?"
         let os = ProcessInfo.processInfo.operatingSystemVersionString
-        return "macOS \(os) / app \(version)(\(build)) / \(Host.current().localizedName ?? "-")"
+        // 蓝牙电源与授权状态：排查「连不上」时这两项往往是根因
+        let power = centralState
+        let auth: String
+        switch CBManager.authorization {
+        case .allowedAlways: auth = "allowed"
+        case .denied: auth = "denied"
+        case .restricted: auth = "restricted"
+        case .notDetermined: auth = "undetermined"
+        @unknown default: auth = "unknown"
+        }
+        return "macOS \(os) / app \(version)(\(build)) / \(Host.current().localizedName ?? "-")" +
+            " / bluetooth power=\(power) auth=\(auth)"
     }
+
+    /// 由 macOS BleClient 在 `centralManagerDidUpdateState` 里更新
+    static var centralState = "-"
 
     private static func remember(_ text: String) {
         let line = stamp.string(from: Date()) + " " + text

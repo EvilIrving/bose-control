@@ -91,7 +91,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag"] {
             uc.add(self, name: name)
         }
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
@@ -200,7 +200,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
       bleDisconnect: function (session) { window.webkit.messageHandlers.bleDisconnect.postMessage(session); },
       listDevices: function () { window.webkit.messageHandlers.listDevices.postMessage({}); },
-      setBrand: function (id) { window.webkit.messageHandlers.setBrand.postMessage(String(id)); }
+      setBrand: function (id) { window.webkit.messageHandlers.setBrand.postMessage(String(id)); },
+      exportDiag: function (text) { window.webkit.messageHandlers.exportDiag.postMessage(String(text)); }
     };
     """
 

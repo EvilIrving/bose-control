@@ -216,6 +216,18 @@ function renderLanguage() {
 }
 
 // 一键导出：页面日志 + 设备列表原样 + 原生环境，交给原生写文件并调起分享
+// 这台机器上走不通的路，导出里明确写出来，免得看日志的人以为是 bug
+function unsupported() {
+  const caps = platformInfo();
+  const transports = Array.isArray(caps.transports) ? caps.transports : [];
+  const list = [];
+  if (hasNative() && !transports.includes("spp")) list.push("SPP（系统不开放给第三方）");
+  if (hasNative() && !transports.includes("ble")) list.push("BLE");
+  if (!hasNative() && !navigator.bluetooth) list.push("Web Bluetooth");
+  if (caps.hub !== true && !bridgeAvailable()) list.push("设备中心（枚举不到系统配对设备）");
+  return list;
+}
+
 function canExportDiag() {
   return typeof window.NativeBLE?.exportDiag === "function" ||
     Boolean(window.webkit?.messageHandlers?.exportDiag);
@@ -228,12 +240,14 @@ function exportDiag() {
     `时间 ${new Date().toString()}`,
     `UA ${navigator.userAgent}`,
     `屏幕 ${screen.width}x${screen.height} dpr=${devicePixelRatio} 语言 ${navigator.language} 时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
-    `原生平台 ${JSON.stringify(env ?? { platform: "browser" })}`,
+    `WebView ${(String(navigator.userAgent).match(/Chrome\/(\d+)/) || [])[1] ?? "非 Chromium"}`,
+    `原生平台 ${env ? JSON.stringify(env) : hasNative() ? "原生（宿主没有 env 接口）" : "浏览器"}`,
     `页面能力 ${JSON.stringify(platformInfo())} / hub=${nativeHub()} / bridge=${bridgeAvailable()} / brands=${brandsHere().map((b) => b.id).join(",")}`,
     `当前品牌 ${getBrand()} / 页面 ${state.page} / link ${state.link} / busy ${state.busy}`,
     `设备名 ${state.name || link.name || "—"} / 通道 ${link.link} / 错误 ${link.lastError || "—"}`,
     `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
       (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
+    `不支持 ${unsupported().join(" / ") || "无"}`,
     `日志 ${logCount()} 行（上限 3000，超出从头丢）`,
   ];
   const text = logText(header);

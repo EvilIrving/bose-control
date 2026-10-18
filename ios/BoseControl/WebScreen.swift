@@ -81,7 +81,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag"] {
             uc.add(self, name: name)
         }
         let conf = WKWebViewConfiguration()
@@ -166,6 +166,11 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                 try full.write(to: url, atomically: true, encoding: .utf8)
                 Diag.log("导出诊断 → \(url.lastPathComponent)")
                 let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                if let pop = share.popoverPresentationController {
+                    pop.sourceView = view
+                    pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
+                    pop.permittedArrowDirections = []
+                }
                 present(share, animated: true)
             } catch {
                 Diag.log("导出诊断失败：\(error.localizedDescription)")

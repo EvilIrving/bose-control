@@ -80,6 +80,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
         guard peripheral === target else { return }
+        if let error { Diag.fail("ble 写失败 \(error.localizedDescription)") }
         writing = false
         if error != nil {
             writeQueue.removeAll()
@@ -208,6 +209,8 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
+        Diag.centralState = stateText
+        Diag.log("central state=\(stateText)")
         guard wantScan else { return }
         if central.state == .poweredOn {
             startScan()
@@ -269,6 +272,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === target else { return }
+        if let error { Diag.fail("ble discoverServices 失败 \(error.localizedDescription)") }
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
             central.cancelPeripheralConnection(peripheral)
             reset()
@@ -286,6 +290,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         error: Error?
     ) {
         guard peripheral === target else { return }
+        if let error { Diag.fail("ble discoverCharacteristics 失败 \(error.localizedDescription)") }
         let chars = service.characteristics ?? []
         let ch = chars.first { $0.uuid == charSecure }
             ?? chars.first { $0.uuid == charPlain }
@@ -324,6 +329,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
+        if let error { Diag.fail("ble 读取失败 \(error.localizedDescription)") }
         guard peripheral === target, characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }

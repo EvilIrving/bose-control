@@ -58,6 +58,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
         // 有的 ROM 会回一个空的 map，values.all{} 对空 map 恒为 true，必须按 key 查
+        Diag.add("bt", "权限回调 ${granted.entries.joinToString { "${it.key.substringAfterLast('.')}=${it.value}" }}")
         if (btPermissions.all { granted[it] == true }) {
             val action = pendingAction ?: { bridge.scanInternal() }
             pendingAction = null
@@ -95,9 +96,10 @@ class MainActivity : ComponentActivity() {
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
                 val line = "[js] ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}"
-                Log.i(TAG, line)
+                Diag.add("web", line)
                 if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
                     lastJsError = "${msg.message()} (:${msg.lineNumber()})"
+                    Diag.add("web", "页面报错 ${lastJsError}")
                 }
                 return true
             }
@@ -114,17 +116,18 @@ class MainActivity : ComponentActivity() {
                 request: WebResourceRequest,
                 error: WebResourceErrorCompat,
             ) {
-                Log.i(TAG, "page error ${error.errorCode} ${error.description} for ${request.url}")
+                Diag.add("web", "page error ${error.errorCode} ${error.description} for ${request.url}")
                 if (request.isForMainFrame) {
                     showBanner("页面没加载出来：${error.errorCode} ${error.description}")
                 }
             }
 
             override fun onPageFinished(view: WebView, url: String) {
-                Log.i(TAG, "page finished $url")
+                Diag.add("web", "page finished $url")
                 view.evaluateJavascript("window.__boseApp === true") { value ->
                     if (value != "true") {
                         val tail = if (lastJsError.isEmpty()) "" else "（$lastJsError）"
+                        Diag.add("web", "页面脚本没跑起来$tail")
                         showBanner("页面脚本没跑起来$tail")
                     }
                 }
@@ -165,9 +168,9 @@ class MainActivity : ComponentActivity() {
             append("WebView: ").append(webView).append("\n")
             append("Android ").append(Build.VERSION.RELEASE)
             append(" / ").append(Build.MANUFACTURER).append(" ").append(Build.MODEL).append("\n")
-            append("截图发给开发者")
+            append("看 logcat -s BOSE 或重新打开 App 后导出诊断")
         }
-        Log.i(TAG, "banner: $text")
+        Diag.add("web", "banner: $text")
         runOnUiThread {
             banner.text = text
             banner.visibility = View.VISIBLE

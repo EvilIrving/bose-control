@@ -253,8 +253,18 @@ export class HeadsetLink {
 
   handleNotify(chunk) {
     if (this._closed) return;
-    const packets = this.codec.parse(chunk, this.link);
-    logLine("rx", `${chunk.length}B ${toHex(chunk).slice(0, 96)}${packets.length ? "" : "（未成帧）"}`);
+    const hex = toHex(chunk);
+    // 先把原始字节记下来：解析抛错时这是唯一能看的东西。超过 128 字节截断并标出来
+    const shown = hex.length > 256 ? `${hex.slice(0, 256)}…(+${chunk.length - 128}B)` : hex;
+    logLine("rx", `raw ${chunk.length}B ${shown}`);
+    let packets = [];
+    try {
+      packets = this.codec.parse(chunk, this.link);
+    } catch (error) {
+      logLine("err", `parse 抛错 ${error.message}；原始 ${hex}`);
+      return;
+    }
+    if (!packets.length) logLine("rx", "未成帧，等后续字节");
     for (const packet of packets) {
       const key = this.codec.key(packet);
       const waited = this.pending.has(key);
