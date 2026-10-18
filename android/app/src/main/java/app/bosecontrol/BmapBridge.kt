@@ -42,6 +42,7 @@ class BmapBridge(
     private var wantTransport = "ble"
     private var wantAddress: String? = null
     private var wantChannels = listOf(1, 2, 3)
+    private var wantServices = listOf<String>()
 
     @JavascriptInterface
     fun bleScan() {
@@ -62,6 +63,13 @@ class BmapBridge(
             for (i in 0 until channels.length()) list.add(channels.optInt(i, 0))
             if (list.isNotEmpty()) wantChannels = list
         }
+        // 品牌私有控制服务的 UUID（vivo 0x0837、OPPO 0x079A）：有这个就先按 UUID 走 SDP，别再猜端口号
+        val services = json?.optJSONArray("services")
+        if (services != null) {
+            val list = mutableListOf<String>()
+            for (i in 0 until services.length()) services.optString(i, "").takeIf { it.isNotEmpty() }?.let { list.add(it) }
+            wantServices = list
+        }
         main.post { activity.requestBtThenScan() }
     }
 
@@ -79,20 +87,59 @@ class BmapBridge(
             return
         }
         val live = connectedAddresses()
-        val rows = mutableListOf<String>()
-        for (device in ad.bondedDevices.orEmpty()) {
-            val name = device.name ?: continue
-            val address = device.address ?: continue
-            val connected = live.contains(address.lowercase())
-            rows.add(
-                "{\"name\":\"" + escapeJson(name) + "\",\"address\":\"" + escapeJson(address) +
-                    "\",\"connected\":" + connected + "}"
-            )
+        val peers = ad.bondedDevices.orEmpty()
+            .mapNotNull { device ->
+                val name = device.name ?: return@mapNotNull null
+                val address = device.address ?: return@mapNotNull null
+                PeerRow(name, address, live.contains(address.lowercase()))
+            }
+            .sortedWith(peerOrder)
+        val json = peers.joinToString(",", "[", "]") { peer ->
+            "{\"name\":\"" + escapeJson(peer.name) + "\",\"address\":\"" + escapeJson(peer.address) +
+                "\",\"connected\":" + peer.connected + "}"
         }
-        val json = "[" + rows.joinToString(",") + "]"
         // 这一整串要塞进单引号里执行，名字里的 ' 和 \ 必须先转义
         val safe = json.replace("\\", "\\\\").replace("'", "\\'")
         js("onDeviceList('$safe')")
+    }
+
+    private data class PeerRow(val name: String, val address: String, val connected: Boolean)
+
+    // 顺序要稳定：已连接在前，组内按名字自然序（数字按数值比，"QC 2" 在 "QC 10" 前，不分大小写）。
+    private val peerOrder = Comparator<PeerRow> { a, b ->
+        when {
+            a.connected && !b.connected -> -1
+            !a.connected && b.connected -> 1
+            else -> naturalCompare(a.name, b.name)
+        }
+    }
+
+    private fun naturalCompare(a: String, b: String): Int {
+        var i = 0
+        var j = 0
+        while (i < a.length && j < b.length) {
+            val ca = a[i]
+            val cb = b[j]
+            if (ca.isDigit() && cb.isDigit()) {
+                var endA = i
+                while (endA < a.length && a[endA].isDigit()) endA++
+                var endB = j
+                while (endB < b.length && b[endB].isDigit()) endB++
+                val numA = a.substring(i, endA).trimStart('0')
+                val numB = b.substring(j, endB).trimStart('0')
+                if (numA.length != numB.length) return numA.length - numB.length
+                val byNumber = numA.compareTo(numB)
+                if (byNumber != 0) return byNumber
+                i = endA
+                j = endB
+                continue
+            }
+            val byChar = ca.lowercaseChar().compareTo(cb.lowercaseChar())
+            if (byChar != 0) return byChar
+            i++
+            j++
+        }
+        return (a.length - i) - (b.length - j)
     }
 
     /** 系统认为正在连着的外设地址（GATT + 各音频 profile）。 */
@@ -372,11 +419,14 @@ class BmapBridge(
         }
     }
 
-    /** 页面指定了设备和端口，按顺序试：标准 SPP UUID 优先，再按端口号反射打开。 */
+    /** 页面指定了设备和端口，按顺序试：品牌服务 UUID 优先，再标准 SPP UUID，最后按端口号反射打开。 */
     private fun openSpp(ad: BluetoothAdapter, address: String, mine: Int) {
         val device = ad.getRemoteDevice(address)
         Thread {
             val sockets = mutableListOf<BluetoothSocket>()
+            for (uuid in wantServices) {
+                runCatching { sockets.add(device.createInsecureRfcommSocketToServiceRecord(UUID.fromString(uuid))) }
+            }
             runCatching { sockets.add(device.createInsecureRfcommSocketToServiceRecord(SPP_UUID)) }
             for (channel in wantChannels) {
                 runCatching {
