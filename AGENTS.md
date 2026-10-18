@@ -101,12 +101,17 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
 
 原生层只做四件事：枚举系统配对设备、按页面给的 `transport` / `address` / `channels` / `services` 建通道、收发字节、上报错误码。加品牌不改原生代码。
 
-### 10. 日志
+### 10. 日志与诊断导出
 
-- 页面：`log()` 写 `console.debug`，同时留最近 20 行给设置页「诊断」显示最近 3 行。
-- macOS：`Diag`（`os.Logger`，subsystem `cain.com.bosecontrol.mac`，全部 `privacy: .public`），同时写 stderr。用 `log stream --predicate 'subsystem == "cain.com.bosecontrol.mac"' --info --debug` 看。
-- Android：`adb logcat -s BOSE`，每一步一行（`gatt connected` → `mtu=517` → `cccd write status=0`）。
-- 新增失败分支时补一条日志，打清「在哪一步、给了什么值、错误码是什么」。
+**不往界面上堆日志行。** 设置页「诊断」只放状态摘要 + 一个「导出诊断」按钮；排查问题靠导出的那份文本，不靠截图。
+
+- 页面：`web/log.js` 是唯一入口，`logLine(scope, msg)`，scope 固定几个短词（`app` / `hub` / `conn` / `tx` / `rx` / `nat` / `err`）。环形缓冲 3000 行，同时写 `console.debug`。全局 `error` / `unhandledrejection` 也接进去。
+- 三端原生各有一份同名 `Diag`：`Diag.add/log(...)` 一行 + 环形缓冲 2000 行，`dump()` 给导出用。
+  - Android：`BmapBridge.kt` 末尾的 `object Diag`，同时写 `adb logcat -s BOSE`。
+  - macOS：`RfcommClient.swift` 的 `enum Diag`（`os.Logger`，subsystem `cain.com.bosecontrol.mac`，全部 `privacy: .public`），同时写 stderr。
+  - iOS：`BleClient.swift` 的 `enum Diag`（subsystem `cain.com.bosecontrol`）。
+- 导出：页面把「系统信息 + 能力 + 设备列表 + 全流程日志」交给原生 `exportDiag(text)`，原生再拼上自己的系统信息和 `Diag.dump()` 写成 `.txt`：Android 存「下载」并调起分享，macOS 存 `~/Downloads` 并在 Finder 里选中，iOS 存 Documents 并弹分享面板。
+- 该记的东西：连接各阶段（transport / address / 通道打开耗时 / ready 耗时 / 首轮读完）、每条请求的 key 与超时、每次收发的字节数与分包方式、原生回调与 GATT/SPP 每一步、设备列表原样名字与品牌匹配结果、错误码。新增失败分支时必须补一条，写清「在哪一步、给了什么值、错误码是什么」。
 
 ## 架构
 

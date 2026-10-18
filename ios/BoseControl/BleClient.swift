@@ -1,5 +1,52 @@
 import CoreBluetooth
 import Foundation
+import UIKit
+import os
+
+// 全流程日志：统一日志一行 + 环形缓冲，导出诊断时整段带走。
+enum Diag {
+    static let subsystem = "cain.com.bosecontrol"
+    private static let logger = Logger(subsystem: subsystem, category: "bt")
+    private static let maxLines = 2000
+    private static var buffer: [String] = []
+    private static let lock = NSLock()
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
+
+    static func log(_ text: String) {
+        logger.notice("\(text, privacy: .public)")
+        remember("I " + text)
+    }
+
+    static func fail(_ text: String) {
+        logger.error("\(text, privacy: .public)")
+        remember("E " + text)
+    }
+
+    static func dump() -> String {
+        lock.lock()
+        defer { lock.unlock() }
+        return buffer.joined(separator: "\n")
+    }
+
+    static func systemInfo() -> String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        return "iOS \(UIDevice.current.systemVersion) / \(UIDevice.current.model) / app \(version)(\(build))"
+    }
+
+    private static func remember(_ text: String) {
+        let line = stamp.string(from: Date()) + " " + text
+        lock.lock()
+        buffer.append(line)
+        if buffer.count > maxLines { buffer.removeFirst(buffer.count - maxLines) }
+        lock.unlock()
+    }
+}
 
 protocol BleClientDelegate: AnyObject {
     func bleDidConnect(name: String)
@@ -42,6 +89,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func scanAndConnect() {
+        Diag.log("scanAndConnect state=\(central.state.rawValue)")
         if central.state == .unknown {
             wantScan = true
             return
@@ -54,7 +102,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func send(hex: String) {
-        guard let ch = writeChar else { return }
+        guard let ch = writeChar else {
+            Diag.fail("send 时还没有写通道")
+            return
+        }
+        Diag.log("write \(hex.count / 2)B")
         writeQueue.append((hexToData(hex), ch))
         flushWrites()
     }
@@ -123,6 +175,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     private func startScan() {
+        Diag.log("scan start（\(Int(scanSeconds))s）")
         reset()
         found.removeAll()
         wantScan = false
@@ -160,11 +213,12 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             connect(ready)
             return
         }
-        NSLog("BOSE scan timeout")
+        Diag.fail("scan 扫完没有候选（看到 \(found.count) 台）")
         delegate?.bleDidFail("none")
     }
 
     private func connect(_ peripheral: CBPeripheral) {
+        Diag.log("connect \(peripheral.name ?? peripheral.identifier.uuidString)")
         reset()
         target = peripheral
         peripheral.delegate = self
@@ -259,17 +313,20 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard peripheral === target else { return }
+        Diag.log("gatt connected \(peripheral.name ?? "-")")
         peripheral.discoverServices([svcApk, svcSig])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard peripheral === target else { return }
+        Diag.fail("connect 失败 \(error?.localizedDescription ?? "-")")
         reset()
         delegate?.bleDidFail("refused")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral === target else { return }
+        Diag.log("disconnected reported=\(reported) err=\(error?.localizedDescription ?? "-")")
         let wasConnected = reported
         reset()
         if wasConnected {
@@ -282,6 +339,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === target else { return }
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
+            Diag.fail("没有 FEBE 服务（\(peripheral.services?.count ?? 0) 个服务）")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("service")
@@ -301,12 +359,14 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             ?? chars.first { $0.uuid == charPlain }
             ?? chars.first { $0.properties.contains(.notify) && $0.properties.contains(.write) }
         guard let ch else {
+            Diag.fail("没有可写的控制特征（\(chars.count) 个）")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("char")
             return
         }
         writeChar = ch
+        Diag.log("notify on \(ch.uuid.uuidString)")
         peripheral.setNotifyValue(true, for: ch)
     }
 
@@ -317,6 +377,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     ) {
         guard peripheral === target, characteristic.uuid == writeChar?.uuid else { return }
         if error != nil || !characteristic.isNotifying {
+            Diag.fail("notify 失败 \(error?.localizedDescription ?? "not notifying")")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("notify")
@@ -333,6 +394,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         guard peripheral === target, characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }
+        Diag.log("read \(data.count)B")
         delegate?.bleDidReceive(data.map { String(format: "%02x", $0) }.joined())
     }
 }

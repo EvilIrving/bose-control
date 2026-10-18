@@ -1,4 +1,5 @@
 import { fromHex, toHex } from "./native.js";
+import { logLine } from "./log.js";
 
 // 浏览器开不了蓝牙串口，本机的 server.py 代开：这里只说 JSON，交给它转给 bt-bridge。
 export class LocalBridge {
@@ -52,6 +53,7 @@ export class LocalBridge {
       this.waiting = settle;
 
       ws.onopen = () => {
+        logLine("nat", `bridge open address=${address} channels=${channels.join(",")} services=${services.length}`);
         ws.send(JSON.stringify({ t: "open", address, channels, services }));
       };
       ws.onmessage = (ev) => {
@@ -63,8 +65,10 @@ export class LocalBridge {
         }
         if (msg.t === "ok") {
           this.open = true;
+          logLine("nat", "bridge ok");
           settle(null);
         } else if (msg.t === "error") {
+          logLine("nat", `bridge error ${msg.code || ""} ${msg.message || ""}`);
           settle(new Error(msg.code || "bridge"));
         } else if (msg.t === "data" && this.onData) {
           this.onData(fromHex(msg.hex));
@@ -72,12 +76,16 @@ export class LocalBridge {
       };
       ws.onclose = () => {
         const was = this.open;
+        logLine("nat", `bridge close open=${was}`);
         this.open = false;
         this.ws = null;
         if (this.waiting) settle(new Error("closed"));
         if (was) this.onClose?.();
       };
-      ws.onerror = () => settle(new Error("bridge"));
+      ws.onerror = () => {
+        logLine("nat", "bridge onerror");
+        settle(new Error("bridge"));
+      };
     });
   }
 

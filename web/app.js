@@ -44,7 +44,7 @@ import {
 } from "./bmap.js";
 import { HeadsetLink, isCancelled } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, setBridgeAvailable, transportFor } from "./brands.js";
+import { brandById, brandForName, bridgeAvailable, brandsHere, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
 import { setUnverified, unverifiedOn } from "./experimental.js";
@@ -67,6 +67,7 @@ import {
 } from "./labels.js";
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
+import { logCount, logLine, logText } from "./log.js";
 import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
@@ -93,6 +94,7 @@ const ui = {
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
   diag: $("diag"),
+  diagActions: $("diag-actions"),
   unverified: $("unverified"),
   toggles: $("toggles"),
   standby: $("standby"),
@@ -160,16 +162,16 @@ let state = {
   levels: {},
 };
 
-// 设置页「诊断」里能直接看到的东西：页面里报错往往只进 console.debug，
-// 装成 App 之后那里根本打不开，所以留一份最近几行给面板。
-const LOG_LINES = [];
-
-function log(line) {
-  console.debug(line);
-  const stamp = new Date().toTimeString().slice(0, 8);
-  LOG_LINES.push(`${stamp} ${line}`);
-  if (LOG_LINES.length > 20) LOG_LINES.shift();
+// 页面里每一段都往 log.js 里记一行，界面上只留「导出诊断」一个按钮。
+function log(line, scope = "app") {
+  logLine(scope, line);
 }
+
+// 页面上任何地方崩了都要留下痕迹，不然只有一行"点不动"可看
+window.addEventListener("error", (ev) => logLine("err", `${ev.message} @ ${ev.filename}:${ev.lineno}`));
+window.addEventListener("unhandledrejection", (ev) => {
+  logLine("err", `unhandled ${ev.reason?.message ?? ev.reason}`);
+});
 
 // 当前这次连接用的是哪个品牌模块；宿主自己不认识任何品牌
 let session = null;
@@ -211,6 +213,36 @@ function renderLanguage() {
     applyLabels();
     renderAll();
   });
+}
+
+// 一键导出：页面日志 + 设备列表原样 + 原生环境，交给原生写文件并调起分享
+function canExportDiag() {
+  return typeof window.NativeBLE?.exportDiag === "function" ||
+    Boolean(window.webkit?.messageHandlers?.exportDiag);
+}
+
+function exportDiag() {
+  const env = nativeEnv();
+  const header = [
+    `# Bose Connector 诊断`,
+    `时间 ${new Date().toString()}`,
+    `UA ${navigator.userAgent}`,
+    `屏幕 ${screen.width}x${screen.height} dpr=${devicePixelRatio} 语言 ${navigator.language} 时区 ${Intl.DateTimeFormat().resolvedOptions().timeZone}`,
+    `原生平台 ${JSON.stringify(env ?? { platform: "browser" })}`,
+    `页面能力 ${JSON.stringify(platformInfo())} / hub=${nativeHub()} / bridge=${bridgeAvailable()} / brands=${brandsHere().map((b) => b.id).join(",")}`,
+    `当前品牌 ${getBrand()} / 页面 ${state.page} / link ${state.link} / busy ${state.busy}`,
+    `设备名 ${state.name || link.name || "—"} / 通道 ${link.link} / 错误 ${link.lastError || "—"}`,
+    `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
+      (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
+    `日志 ${logCount()} 行（上限 3000，超出从头丢）`,
+  ];
+  const text = logText(header);
+  log(`导出诊断 ${text.length} 字符`);
+  try {
+    nativeCall("exportDiag", text);
+  } catch (err) {
+    log(`导出失败：${err.message}`, "err");
+  }
 }
 
 function renderSettings() {
@@ -260,14 +292,15 @@ function renderDiag() {
   if (env && typeof env.loc !== "undefined") {
     rows.push([t("location"), env.loc === 1 ? t("btOn") : t("btOff")]);
   }
-  if (peerDiag.total) {
-    rows.push([t("diagPairMatch"), `${peerDiag.matched} / ${peerDiag.total}`]);
-    if (peerDiag.dropped.length) rows.push([t("diagUnmatched"), peerDiag.dropped.join("、")]);
-  }
   rows.push([t("lastError"), link.lastError || "—"]);
-  for (const line of LOG_LINES.slice(-3)) rows.push([t("recentLog"), line]);
   if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
   fillRows(ui.diag, rows);
+  ui.diagActions.replaceChildren();
+  if (canExportDiag()) {
+    const btn = chip(t("exportDiag"), false);
+    btn.addEventListener("click", exportDiag);
+    ui.diagActions.appendChild(btn);
+  }
 }
 
 function setPage(page) {
@@ -468,6 +501,8 @@ window.onDeviceList = (json) => {
   // 但要在诊断里留一行：少一台时得能分清是原生没给、还是给了但没认上
   const dropped = rows.filter((peer) => !brandForName(peer.name)).map((peer) => peer.name || peer.address);
   peerDiag = { total: rows.length, matched: rows.length - dropped.length, dropped };
+  logLine("hub", `list ${rows.length} 台，认得 ${peerDiag.matched}：` +
+    rows.map((p) => `${p.name || "(无名)"}@${p.address || "-"}=${brandForName(p.name)?.id ?? "?"}`).join(" | "));
   // 设置页开着的时候列表还在轮询，识别结果要跟着更新
   if (ui.settings.classList.contains("open")) renderDiag();
   const droppedNow = dropped.join("\u0000");
@@ -718,6 +753,8 @@ if (!navigator.bluetooth && !hasNative()) {
   ui.go.disabled = true;
   state.link = "unsupported";
 }
+logLine("app", `boot ua=${navigator.userAgent}`);
+logLine("app", `platform=${JSON.stringify(platformInfo())}`);
 renderAll();
 if (hasNative()) {
   if (hubReady()) {

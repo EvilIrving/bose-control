@@ -76,9 +76,7 @@ export const LABELS = {
   btOff: { zh: "已关闭", en: "Off" },
   btNone: { zh: "不可用", en: "Unavailable" },
   lastError: { zh: "上次错误", en: "Last error" },
-  recentLog: { zh: "最近日志", en: "Recent logs" },
-  diagPairMatch: { zh: "认得", en: "Recognized" },
-  diagUnmatched: { zh: "没认出的", en: "Unmatched" },
+  exportDiag: { zh: "导出诊断", en: "Export diagnostics" },
   location: { zh: "定位", en: "Location" },
 
   create: { zh: "新建模式", en: "New Mode" },

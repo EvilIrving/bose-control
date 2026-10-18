@@ -310,20 +310,54 @@ enum Diag {
     static let subsystem = "cain.com.bosecontrol.mac"
     private static let logger = Logger(subsystem: subsystem, category: "bt")
     private static let stderrQueue = DispatchQueue(label: "diag.stderr")
+    // 环形缓冲：导出诊断时整段带走，用户不用再截图
+    private static let maxLines = 2000
+    private static var buffer: [String] = []
+    private static let bufferLock = NSLock()
+    private static let stamp: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss.SSS"
+        return f
+    }()
 
     static func log(_ text: String) {
         logger.notice("\(text, privacy: .public)")
         emit(text)
+        remember("I " + text)
     }
 
     static func fail(_ text: String) {
         logger.error("\(text, privacy: .public)")
         emit("error " + text)
+        remember("E " + text)
+    }
+
+    static func dump() -> String {
+        bufferLock.lock()
+        defer { bufferLock.unlock() }
+        return buffer.joined(separator: "\n")
+    }
+
+    static func systemInfo() -> String {
+        let info = Bundle.main.infoDictionary ?? [:]
+        let version = info["CFBundleShortVersionString"] as? String ?? "?"
+        let build = info["CFBundleVersion"] as? String ?? "?"
+        let os = ProcessInfo.processInfo.operatingSystemVersionString
+        return "macOS \(os) / app \(version)(\(build)) / \(Host.current().localizedName ?? "-")"
+    }
+
+    private static func remember(_ text: String) {
+        let line = stamp.string(from: Date()) + " " + text
+        bufferLock.lock()
+        buffer.append(line)
+        if buffer.count > maxLines { buffer.removeFirst(buffer.count - maxLines) }
+        bufferLock.unlock()
     }
 
     // 每个数据包一行，默认级别看不到，排查时加 --debug 才出
     static func debug(_ text: String) {
         logger.debug("\(text, privacy: .public)")
+        remember("D " + text)
     }
 
     static func code(_ status: IOReturn) -> String {

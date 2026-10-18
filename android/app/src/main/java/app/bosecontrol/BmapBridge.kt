@@ -13,12 +13,21 @@ import android.bluetooth.BluetoothSocket
 import android.bluetooth.BluetoothStatusCodes
 import android.bluetooth.le.ScanCallback
 import android.bluetooth.le.ScanResult
+import android.content.ContentValues
+import android.content.Intent
+import android.net.Uri
 import android.os.Build
+import android.os.Environment
 import android.os.Handler
 import android.os.Looper
+import android.provider.MediaStore
 import android.util.Log
 import android.webkit.JavascriptInterface
 import android.webkit.WebView
+import java.io.File
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.UUID
 
 @SuppressLint("MissingPermission")
@@ -183,6 +192,7 @@ class BmapBridge(
 
     @JavascriptInterface
     fun bleDisconnect(token: String) {
+        log("js bleDisconnect token=$token")
         main.post {
             if (token == session) {
                 close()
@@ -210,10 +220,61 @@ class BmapBridge(
         val bonded = runCatching { ad?.bondedDevices?.size }.getOrNull() ?: -1
         val bose = runCatching { ad?.bondedDevices?.count { isBose(it.name ?: "") } }.getOrNull() ?: -1
         val loc = if (activity.locationEnabled()) 1 else 0
-        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT},\"adapter\":$state,\"bonded\":$bonded,\"bose\":$bose,\"loc\":$loc,\"oem\":\"${Build.MANUFACTURER}\"}"
+        val pkg = runCatching { activity.packageManager.getPackageInfo(activity.packageName, 0) }.getOrNull()
+        val app = pkg?.versionName ?: "?"
+        return "{\"platform\":\"android\",\"sdk\":${Build.VERSION.SDK_INT}," +
+            "\"release\":\"${Build.VERSION.RELEASE}\",\"oem\":\"${Build.MANUFACTURER}\",\"model\":\"${Build.MODEL}\"," +
+            "\"app\":\"$app\",\"adapter\":$state,\"bonded\":$bonded,\"bose\":$bose,\"loc\":$loc}"
+    }
+
+    /** 页面把整份诊断文本交过来：写到「下载」目录，再调起分享。 */
+    @JavascriptInterface
+    fun exportDiag(text: String) {
+        main.post {
+            try {
+                val name = "bose-diag-" +
+                    SimpleDateFormat("yyyyMMdd-HHmmss", Locale.US).format(Date()) + ".txt"
+                val full = text + "\n\n==== 原生 ====\n" + env() + "\n\n" + Diag.dump() + "\n"
+                val bytes = full.toByteArray()
+                val uri: Uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    val values = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "text/plain")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS)
+                        put(MediaStore.MediaColumns.IS_PENDING, 1)
+                    }
+                    val resolver = activity.contentResolver
+                    val target = resolver.insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, values)
+                    if (target == null) {
+                        Log.d(TAG, "exportDiag: MediaStore insert 返回 null")
+                        return@post
+                    }
+                    resolver.openOutputStream(target)?.use { it.write(bytes) }
+                    values.clear()
+                    values.put(MediaStore.MediaColumns.IS_PENDING, 0)
+                    resolver.update(target, values, null, null)
+                    target
+                } else {
+                    val dir = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
+                    val file = File(dir, name)
+                    file.writeBytes(bytes)
+                    Uri.fromFile(file)
+                }
+                Log.d(TAG, "exportDiag → $uri（${bytes.size}B）")
+                val send = Intent(Intent.ACTION_SEND).apply {
+                    type = "text/plain"
+                    putExtra(Intent.EXTRA_STREAM, uri)
+                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                activity.startActivity(Intent.createChooser(send, "导出诊断"))
+            } catch (e: Exception) {
+                Log.d(TAG, "exportDiag 失败：${e.message}")
+            }
+        }
     }
 
     fun scanInternal() {
+        log("scan transport=${wantTransport ?: "-"} address=${wantAddress ?: "-"} channels=$wantChannels services=${wantServices.size}")
         val ad = adapter ?: return fail("adapter")
         if (!ad.isEnabled) return fail("off")
         close()
@@ -417,6 +478,7 @@ class BmapBridge(
                     if (mine != gen) return@execute
                     socket.outputStream.write(bytes)
                     socket.outputStream.flush()
+                    log("spp write ${bytes.size}B")
                 } catch (_: Exception) {
                     fail("write", mine)
                 }
@@ -491,10 +553,12 @@ class BmapBridge(
                     sockets.add(sock)
                 }
             }
+            log("spp 候选 ${sockets.size} 个（服务 ${services.size} / 端口 ${channels.joinToString(",")}）")
             for (sock in sockets) {
                 try {
                     if (!trackOpening(sock, mine)) { sock.close(); return@Thread }
                     sock.connect()
+                    log("spp connected ${sock.remoteDevice.address}")
                     synchronized(this) { if (openingSocket === sock) openingSocket = null }
                     if (mine != gen) {
                         runCatching { sock.close() }
@@ -508,7 +572,8 @@ class BmapBridge(
                         sppThread = Thread { readSpp(sock, mine) }.also { it.start() }
                     }
                     return@Thread
-                } catch (_: Exception) {
+                } catch (error: Exception) {
+                    log("spp 端口失败 ${error.message}")
                     runCatching { sock.close() }
                 }
             }
@@ -556,9 +621,11 @@ class BmapBridge(
             while (true) {
                 val n = sock.inputStream.read(buf)
                 if (n <= 0) break
+                log("spp read ${n}B")
                 event("onDataReceived", mine, bytesToHex(buf.copyOf(n)))
             }
-        } catch (_: Exception) {
+        } catch (error: Exception) {
+            log("spp read 中断 ${error.message}")
         }
         event("onNativeDisconnected", mine)
     }
@@ -615,7 +682,7 @@ class BmapBridge(
     }
 
     private fun log(line: String) {
-        Log.i(TAG, line)
+        Diag.add("bt", line)
     }
 
     companion object {
@@ -642,4 +709,23 @@ class BmapBridge(
             }
         }
     }
+}
+
+/** 全流程日志：logcat 一行 + 环形缓冲，导出诊断时整段带走。 */
+object Diag {
+    private const val MAX = 2000
+    private const val TAG = "BOSE"
+    private val buffer = ArrayDeque<String>(MAX)
+    private val stamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+
+    @Synchronized
+    fun add(scope: String, message: String) {
+        val line = stamp.format(Date()) + " " + scope.padEnd(5) + " " + message
+        Log.d(TAG, line)
+        if (buffer.size >= MAX) buffer.removeFirst()
+        buffer.addLast(line)
+    }
+
+    @Synchronized
+    fun dump(): String = buffer.joinToString("\n")
 }

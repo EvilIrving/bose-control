@@ -1,4 +1,5 @@
 import SwiftUI
+import UIKit
 import WebKit
 
 private let assetScheme = "bose"
@@ -155,6 +156,20 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                   let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
                   body["session"] == session?.token, let hex = body["hex"] else { return }
             session?.client.send(hex: hex)
+        case "exportDiag":
+            guard let text = message.body as? String else { return }
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+            let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+            let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+            do {
+                try full.write(to: url, atomically: true, encoding: .utf8)
+                Diag.log("导出诊断 → \(url.lastPathComponent)")
+                let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
+                present(share, animated: true)
+            } catch {
+                Diag.log("导出诊断失败：\(error.localizedDescription)")
+            }
         case "bleDisconnect":
             guard let token = message.body as? String, token == session?.token else { return }
             session?.client.disconnect()

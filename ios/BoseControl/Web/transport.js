@@ -1,5 +1,6 @@
 import { LocalBridge } from "./bridge.js";
 import { fromHex, hasNative, nativeCall, toHex } from "./native.js";
+import { logLine } from "./log.js";
 
 const MAX_IN_FLIGHT = 4;
 let nativeOwner = null;
@@ -70,17 +71,22 @@ export class HeadsetLink {
   _native(kind, value, token) {
     if (this._closed || token !== this._token) return;
     if (kind === "connected") {
-      if (!this._connectWait) return;
+      if (!this._connectWait) {
+        logLine("nat", `connected token=${token} 但当前不在等连接，丢掉`);
+        return;
+      }
       const data = typeof value === "string" ? JSON.parse(value || "{}") : value || {};
       this.nativeOn = true;
       this.link = data.link === "spp" ? "spp" : "ble";
       this.device = { name: data.name || "" };
+      logLine("nat", `connected name="${this.device.name}" link=${this.link} token=${token}`);
       this._connectWait.resolve();
     } else if (kind === "data") {
       if (this.nativeOn) this.handleNotify(fromHex(String(value)));
     } else {
       const error = new Error(kind === "error" ? String(value || "native error") : "lost");
       this.lastError = error.message;
+      logLine("nat", `${kind} ${error.message} token=${token}`);
       const connecting = Boolean(this._connectWait);
       this.disconnect(error);
       if (!connecting) this.onDisconnected?.();
@@ -247,8 +253,12 @@ export class HeadsetLink {
 
   handleNotify(chunk) {
     if (this._closed) return;
-    for (const packet of this.codec.parse(chunk, this.link)) {
+    const packets = this.codec.parse(chunk, this.link);
+    logLine("rx", `${chunk.length}B ${toHex(chunk).slice(0, 96)}${packets.length ? "" : "（未成帧）"}`);
+    for (const packet of packets) {
       const key = this.codec.key(packet);
+      const waited = this.pending.has(key);
+      logLine("rx", `key=${key} ${packet.byteLength ?? packet.length ?? "?"}B ${waited ? "有等待项" : "无等待项"}`);
       this.pending.get(key)?.finish(null, packet);
       this.onPacket?.(packet);
     }
@@ -264,7 +274,10 @@ export class HeadsetLink {
       this._check(epoch);
       this._lastWriteAt = Date.now();
       onSend();
-      for (const chunk of this.codec.chunks(packetBytes, this.link)) {
+      const chunks = this.codec.chunks(packetBytes, this.link);
+      const via = this.bridge ? "bridge" : this.nativeOn ? "native" : "webble";
+      logLine("tx", `write ${packetBytes.length}B → ${chunks.length} 包 via ${via} key=${this.codec.key(this.codec.header(packetBytes))}`);
+      for (const chunk of chunks) {
         this._check(epoch);
         if (this.bridge) this.bridge.send(chunk);
         else if (this.nativeOn && nativeOwner === this) {
@@ -319,12 +332,20 @@ export class HeadsetLink {
       this._pump();
     };
     this.pending.set(job.key, { finish });
+    const started = Date.now();
     this.write(job.packetBytes, () => {
-      if (!settled) timer = setTimeout(() => finish(new Error(`超时 ${job.key}`)), job.timeoutMs);
-    }).catch((error) => finish(error));
+      if (!settled) timer = setTimeout(() => {
+        logLine("tx", `key=${job.key} 超时 ${job.timeoutMs}ms（已等 ${Date.now() - started}ms）`);
+        finish(new Error(`超时 ${job.key}`));
+      }, job.timeoutMs);
+    }).catch((error) => {
+      logLine("tx", `key=${job.key} 写失败 ${error.message}`);
+      finish(error);
+    });
   }
 
   rejectAll(error) {
+    logLine("conn", `rejectAll ${error?.message || ""}（队列 ${this._queue.length} / 在途 ${this.pending.size}）`);
     this._epoch += 1;
     for (const job of this._queue.splice(0)) job.reject(error);
     for (const item of [...this.pending.values()]) item.finish(error);

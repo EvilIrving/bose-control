@@ -166,6 +166,20 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
                 Diag.log("js listDevices → \(payload)")
             }
             js("onDeviceList('\(escape(payload))')")
+        case "exportDiag":
+            guard let text = message.body as? String else { break }
+            let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+            let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+                ?? FileManager.default.temporaryDirectory
+            let url = dir.appendingPathComponent("bose-diag-\(stamp).txt")
+            let full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+            do {
+                try full.write(to: url, atomically: true, encoding: .utf8)
+                Diag.log("导出诊断 → \(url.path)")
+                NSWorkspace.shared.activateFileViewerSelecting([url])
+            } catch {
+                Diag.log("导出诊断失败：\(error.localizedDescription)")
+            }
         case "setBrand":
             if let id = message.body as? String {
                 Diag.log("js setBrand \(id)")
