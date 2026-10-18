@@ -48,6 +48,23 @@ xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configurati
 
 本机没有 Android SDK 时用 Android Studio 打开 `android/` 再 Assemble Release。
 
+### 连不上时看什么
+
+```bash
+adb logcat -s BOSE
+```
+
+每一步都会打一行：`gatt connected` → `mtu=517` → `cccd write status=0` → 之后才开始收数据。出现 `fail xxx` 就是卡在哪一步，`xxx` 和页面上的提示一一对应（映射在 `web/link.js`）。
+
+几个必须做对的地方（做错了会「连上但什么都不显示」）：
+
+- **必须自己写 CCCD**（`00002902-…`）。只调 `setCharacteristicNotification` 只是让本机转发通知，耳机侧并没有开始推数据。
+- **先 `requestMtu(517)` 再读**。默认 MTU 23，模式配置这类 48 字节的回包会收不全。
+- **API 33+ 用新回调**：`onCharacteristicChanged(gatt, ch, value)` / `writeCharacteristic(ch, bytes, type)`，老接口在新系统上拿不到数据。
+- 耳机正连着手机听歌时 BLE 扫不到，代码会退到「已配对设备」再试 RFCOMM。
+
+> `android/` 里没有 `gradlew`，需要 Android Studio 或本机 Gradle 生成 wrapper 后命令行构建。
+
 ## 传输
 
 | | BLE GATT | RFCOMM |

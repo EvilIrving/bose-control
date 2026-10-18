@@ -72,14 +72,31 @@
         <div id="toggles" class="chips"></div>
       </section>
       <section>
+        <button id="settings-open" class="chip" type="button" data-label="settings"></button>
+      </section>
+    </main>
+    <section id="settings" hidden>
+      <div id="settings-head">
+        <h1 data-label="settings"></h1>
+        <button id="settings-close" type="button" class="chip" data-label="done"></button>
+      </div>
+      <section>
+        <h2 data-label="language"></h2>
+        <div id="lang" class="chips"></div>
+      </section>
+      <section>
         <h2 data-label="voice"></h2>
         <div id="voice" class="chips"></div>
+      </section>
+      <section>
+        <h2 data-label="others"></h2>
+        <div id="behaviour" class="chips"></div>
       </section>
       <section>
         <h2 data-label="standby"></h2>
         <div id="standby" class="chips"></div>
       </section>
-    </main>
+    </section>
     <script type="module" src="./app.js"></script>
   </body>
 </html>

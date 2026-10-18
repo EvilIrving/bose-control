@@ -206,7 +206,8 @@ test("hint stays on one line on a narrow phone", () => {
   assert.match(css.match(/#hint \{([^}]*)\}/)[1], /min-height: 1\.4em/);
   assert.match(css, /body\.idle #hint \{\s*display: block;/);
   for (const [key, text] of Object.entries(LINK_TEXT)) {
-    assert.ok(text.length <= 10, `hint too long (${key}): ${text}`);
+    assert.ok(text.zh.length <= 10, `中文提示太长 (${key}): ${text.zh}`);
+    assert.ok(text.en.length <= 32, `英文提示太长 (${key}): ${text.en}`);
   }
 });
 
@@ -231,6 +232,9 @@ test("linkOf turns native codes into one state each", () => {
     ["connect", "failed"],
     ["write", "failed"],
     ["spp", "failed"],
+    ["scan", "failed"],
+    ["mtu", "failed"],
+    ["descriptor", "failed"],
   ];
   for (const [code, link] of cases) assert.equal(linkOf(new Error(code)), link, code);
   assert.equal(linkOf({ name: "NotAllowedError", message: "boom" }), "denied");
@@ -241,7 +245,9 @@ test("linkOf turns native codes into one state each", () => {
   assert.equal(linkOf(undefined), "failed");
 });
 
-test("battery labels follow the component count", () => {
+test("battery labels follow the component count", async () => {
+  const { setLang } = await import("../web/labels.js");
+  setLang("zh");
   assert.equal(batteryText([]), "");
   assert.equal(batteryText([{ level: 80, component: 0 }]), "80%");
   assert.equal(
@@ -259,6 +265,26 @@ test("battery labels follow the component count", () => {
     ]),
     "左 92% 盒 50% 右 88%",
   );
+  setLang("en");
+  assert.equal(
+    batteryText([
+      { level: 92, component: 0 },
+      { level: 88, component: 1 },
+    ]),
+    "L 92% R 88%",
+  );
+  setLang("zh");
+});
+
+test("切换语言会换掉界面文案", async () => {
+  const { setLang, t, voiceLanguageName } = await import("../web/labels.js");
+  setLang("zh");
+  assert.equal(t("disconnect"), "断开连接");
+  assert.equal(voiceLanguageName(8), "中文");
+  setLang("en");
+  assert.equal(t("disconnect"), "Disconnect");
+  assert.equal(voiceLanguageName(8), "Chinese");
+  setLang("zh");
 });
 
 test("产品 ID 能从回包取出并映射到官方型号名", async () => {
@@ -267,6 +293,24 @@ test("产品 ID 能从回包取出并映射到官方型号名", async () => {
   assert.equal(productIdOf(payload), 16514);
   assert.equal(productName(productIdOf(payload)), "Bose QC Ultra 2 HP");
   assert.equal(productName(0x9999), "");
+});
+
+test("所有文案都有中英两份", async () => {
+  const { LABELS, SPATIAL_OPTIONS, SELF_VOICE_OPTIONS, STANDBY_OPTIONS, VOICE_LANGUAGES } = await import(
+    "../web/labels.js"
+  );
+  for (const [key, value] of Object.entries(LABELS)) {
+    assert.ok(value.zh, `缺少中文: ${key}`);
+    assert.ok(value.en, `缺少英文: ${key}`);
+  }
+  for (const list of [SPATIAL_OPTIONS, SELF_VOICE_OPTIONS, STANDBY_OPTIONS]) {
+    for (const option of list) {
+      assert.ok(option.zh && option.en, `选项缺少文案: ${JSON.stringify(option)}`);
+    }
+  }
+  for (const [id, name] of Object.entries(VOICE_LANGUAGES)) {
+    assert.ok(name.zh && name.en, `语言缺少文案: ${id}`);
+  }
 });
 
 test("每个 data-label 都有官方中英文案", async () => {

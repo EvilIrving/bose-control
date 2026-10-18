@@ -259,32 +259,6 @@ export function parseManufactured(payload) {
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export const VOICE_LANGUAGES = {
-  0: "英语（英）",
-  1: "英语（美）",
-  2: "法语",
-  3: "意大利语",
-  4: "德语",
-  5: "西班牙语（欧）",
-  6: "西班牙语（墨）",
-  7: "葡萄牙语（巴西）",
-  8: "中文",
-  9: "韩语",
-  10: "俄语",
-  11: "波兰语",
-  12: "希伯来语",
-  13: "土耳其语",
-  14: "荷兰语",
-  15: "日语",
-  16: "粤语",
-  17: "阿拉伯语",
-  18: "瑞典语",
-  19: "丹麦语",
-  20: "挪威语",
-  21: "芬兰语",
-  22: "印地语",
-};
-
 export function parseVoicePrompts(payload) {
   if (!payload.length) return null;
   const head = payload[0];
@@ -295,13 +269,12 @@ export function parseVoicePrompts(payload) {
       : 0;
   const supported = [];
   for (let id = 0; id < 23; id++) {
-    if ((bitmap >>> id) & 1) supported.push({ id, name: VOICE_LANGUAGES[id] ?? `语言 ${id}` });
+    if ((bitmap >>> id) & 1) supported.push(id);
   }
   return {
     enabled: Boolean((head >> 5) & 1),
     togglable: Boolean((head >> 6) & 1),
     language,
-    languageName: VOICE_LANGUAGES[language] ?? `语言 ${language}`,
     supported,
   };
 }

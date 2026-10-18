@@ -37,7 +37,17 @@ import {
 import { BoseBle } from "./ble.js";
 import { batteryText, linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
-import { SPATIAL_OPTIONS, STANDBY_OPTIONS, SELF_VOICE_OPTIONS, pick, t } from "./labels.js";
+import {
+  LANG_NAMES,
+  SPATIAL_OPTIONS,
+  STANDBY_OPTIONS,
+  SELF_VOICE_OPTIONS,
+  getLang,
+  pick,
+  setLang,
+  t,
+  voiceLanguageName,
+} from "./labels.js";
 import { hasNative } from "./native.js";
 
 const ble = new BoseBle();
@@ -57,6 +67,11 @@ const ui = {
   spatial: $("spatial"),
   sidetone: $("sidetone"),
   voice: $("voice"),
+  behaviour: $("behaviour"),
+  lang: $("lang"),
+  settings: $("settings"),
+  settingsOpen: $("settings-open"),
+  settingsClose: $("settings-close"),
   toggles: $("toggles"),
   standby: $("standby"),
 };
@@ -353,7 +368,7 @@ function renderVoice() {
   if (!voice || !voice.supported.length) return;
   chips(
     ui.voice,
-    voice.supported.map((language) => ({ key: language.id, label: language.name })),
+    voice.supported.map((id) => ({ key: id, label: voiceLanguageName(id) })),
     voice.language,
     (id) => setVoicePrompt(voice.enabled, id),
   );
@@ -365,9 +380,6 @@ function renderToggles() {
     { key: "wind", label: t("wind"), on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
     { key: "mp", label: t("multipoint"), on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
     { key: "talk", label: t("conversation"), on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
-    { key: "touch", label: t("touch"), on: state.captouch === false, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
-    { key: "answer", label: t("autoAnswer"), on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
-    { key: "play", label: t("autoPlay"), on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
   ];
   let n = 0;
   for (const item of items) {
@@ -381,6 +393,42 @@ function renderToggles() {
     ui.toggles.appendChild(btn);
   }
   pane(ui.toggles, n > 0);
+}
+
+function renderBehaviour() {
+  const items = [
+    { key: "touch", label: t("touch"), on: state.captouch === false, show: state.captouch != null, run: () => setCaptouchDisabled(!state.captouch) },
+    { key: "answer", label: t("autoAnswer"), on: state.autoAnswer, show: state.autoAnswer != null, run: () => setAutoAnswer(!state.autoAnswer) },
+    { key: "play", label: t("autoPlay"), on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
+  ];
+  let n = 0;
+  ui.behaviour.innerHTML = "";
+  for (const item of items) {
+    if (item.show === false) continue;
+    n += 1;
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip" + (item.on ? " on" : "");
+    btn.textContent = item.label;
+    btn.addEventListener("click", item.run);
+    ui.behaviour.appendChild(btn);
+  }
+  pane(ui.behaviour, n > 0);
+}
+
+function renderLanguage() {
+  chips(ui.lang, LANG_NAMES.map((item) => ({ key: item.id, label: item.native })), getLang(), (id) => {
+    setLang(id);
+    applyLabels();
+    renderAll();
+  });
+}
+
+function renderSettings() {
+  renderLanguage();
+  renderVoice();
+  renderBehaviour();
+  renderStandby();
 }
 
 function renderStandby() {
@@ -418,7 +466,7 @@ function renderAll() {
   renderSidetone();
   renderVoice();
   renderToggles();
-  renderStandby();
+  renderSettings();
 }
 
 async function loadDevice() {
@@ -710,6 +758,15 @@ ui.go.addEventListener("click", () => {
     return;
   }
   connect();
+});
+
+ui.settingsOpen.addEventListener("click", () => {
+  ui.settings.hidden = false;
+  renderSettings();
+});
+
+ui.settingsClose.addEventListener("click", () => {
+  ui.settings.hidden = true;
 });
 
 ui.deviceToggle.addEventListener("click", () => {

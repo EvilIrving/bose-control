@@ -1,14 +1,16 @@
+import { getLang } from "./labels.js";
+
 export const LINK_TEXT = {
-  idle: "请先连接耳机",
-  busy: "正在找耳机",
-  off: "需要先开启蓝牙",
-  denied: "需要蓝牙权限",
-  unsupported: "这边连不了蓝牙",
-  notfound: "没找到耳机，再试一次",
-  refused: "耳机被别的设备连着",
-  noproto: "设备不支持",
-  failed: "没连上，再试一次",
-  lost: "请重新连接",
+  idle: { zh: "请先连接耳机", en: "Connect headphones first" },
+  busy: { zh: "正在找耳机", en: "Looking for headphones" },
+  off: { zh: "需要先开启蓝牙", en: "Turn on Bluetooth first" },
+  denied: { zh: "需要蓝牙权限", en: "Bluetooth permission needed" },
+  unsupported: { zh: "这边连不了蓝牙", en: "Bluetooth unavailable here" },
+  notfound: { zh: "没找到耳机，再试一次", en: "No headphones, try again" },
+  refused: { zh: "耳机被别的设备连着", en: "Connected to another device" },
+  noproto: { zh: "设备不支持", en: "Device not supported" },
+  failed: { zh: "没连上，再试一次", en: "Not connected, try again" },
+  lost: { zh: "请重新连接", en: "Reconnect please" },
 };
 
 const LINK_BY_CODE = {
@@ -27,6 +29,7 @@ const LINK_BY_CODE = {
   char: "noproto",
   notify: "noproto",
   refused: "refused",
+  scan: "failed",
   dropped: "refused",
   connect: "failed",
   write: "failed",
@@ -50,12 +53,14 @@ export function linkOf(err) {
 }
 
 export function linkText(link) {
-  return LINK_TEXT[link] ?? LINK_TEXT.failed;
+  const item = LINK_TEXT[link] ?? LINK_TEXT.failed;
+  return item[getLang()] ?? item.zh;
 }
 
 function batteryLabel(component, three) {
-  if (three) return component === 1 ? "盒" : component === 0 ? "左" : "右";
-  return component === 0 ? "左" : component === 1 ? "右" : "电";
+  const zh = getLang() === "zh";
+  if (three) return component === 1 ? (zh ? "盒" : "Case") : component === 0 ? (zh ? "左" : "L") : zh ? "右" : "R";
+  return component === 0 ? (zh ? "左" : "L") : component === 1 ? (zh ? "右" : "R") : zh ? "电" : "Battery";
 }
 
 export function batteryText(rows) {

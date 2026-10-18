@@ -81,7 +81,7 @@ export class BoseBle {
       await new Promise((resolve, reject) => {
         this._connectWait = { resolve, reject };
         try {
-          nativeCall("bleScan", {});
+          nativeCall("bleScan");
         } catch (err) {
           this._connectWait = null;
           reject(err);

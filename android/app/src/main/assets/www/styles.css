@@ -16,6 +16,13 @@
 html {
   -webkit-text-size-adjust: 100%;
   text-size-adjust: 100%;
+  scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
 }
 
 html,
@@ -326,6 +333,30 @@ section h2 {
   word-break: break-all;
 }
 
+#settings {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  overflow-y: auto;
+  background: var(--bg);
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-right: max(1rem, env(safe-area-inset-right));
+  padding-bottom: max(1.5rem, env(safe-area-inset-bottom));
+  padding-left: max(1rem, env(safe-area-inset-left));
+}
+
+#settings-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.4rem;
+}
+
+#settings > section + section {
+  margin-top: 1.1rem;
+}
+
 [hidden] {
   display: none !important;
 }
@@ -357,7 +388,8 @@ section h2 {
     flex-direction: column;
     gap: 1.4rem;
     min-height: 0;
-    overflow: hidden;
+    overflow: auto;
+    scrollbar-width: none;
   }
 
   main > * + * {

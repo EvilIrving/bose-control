@@ -198,8 +198,9 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             0xDE, 0xCA, 0xDE, 0xAF, 0xDE, 0xCA, 0xCA, 0xFF
         ]
         spp.withUnsafeBytes { raw in
-            if let uuid = IOBluetoothSDPUUID(bytes: raw.baseAddress, length: spp.count),
-               let rec = device.getServiceRecord(for: uuid) {
+            guard let base = raw.baseAddress else { return }
+            let uuid = IOBluetoothSDPUUID(bytes: base, length: spp.count)
+            if let rec = device.getServiceRecord(for: uuid) {
                 var channelID: BluetoothRFCOMMChannelID = 0
                 if rec.getRFCOMMChannelID(&channelID) == kIOReturnSuccess, channelID > 0 {
                     ids.append(channelID)
