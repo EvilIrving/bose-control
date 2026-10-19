@@ -95,22 +95,21 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         var r = ev.reason;
         post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
       });
+      var t0 = Date.now();
       var reported = false;
-      function report(ok) {
+      function report(ok, why) {
         if (reported) return;
         reported = true;
-        post('appReady', { ok: ok });
+        post('appReady', { ok: ok, reason: why, elapsedMs: Date.now() - t0 });
       }
       window.addEventListener('load', function () {
         setTimeout(function () {
-          if (window.__boseApp === true) report(true);
-          else report(false);
+          report(window.__boseApp === true, 'load-check');
         }, 800);
       });
-      var tries = 0;
       var timer = setInterval(function () {
-        if (window.__boseApp === true) { clearInterval(timer); report(true); }
-        else if (++tries > 150) { clearInterval(timer); report(false); }
+        if (window.__boseApp === true) { clearInterval(timer); report(true, 'poll'); }
+        else if (Date.now() - t0 > 15000) { clearInterval(timer); report(false, 'poll-timeout'); }
       }, 100);
     })();
     """
@@ -155,7 +154,31 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         lockGestures()
         view.addSubview(web)
         web.load(URLRequest(url: URL(string: startURL)!))
+        #if DEBUG
+        scheduleSelfTestIfAsked()
+        #endif
     }
+
+    #if DEBUG
+    /// 只给自检用：模拟器里跑 `SIMCTL_CHILD_BOSE_DIAG_SELFTEST=1` 时会导出一份到 Documents。
+    private func scheduleSelfTestIfAsked() {
+        guard ProcessInfo.processInfo.environment["BOSE_DIAG_SELFTEST"] == "1" else { return }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self else { return }
+            let missing = ProcessInfo.processInfo.environment["BOSE_DIAG_MISSING"] == "1"
+            let head = missing ? "页面未启动，页面日志不可用（selftest）" : "# Bose Connector 诊断 selftest\n"
+            let out = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
+                .appendingPathComponent("bose-selftest.txt")
+            let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+            do {
+                try full.write(to: out, atomically: true, encoding: .utf8)
+                NSLog("SELFTEST ok path=\(out.path)")
+            } catch {
+                NSLog("SELFTEST fail \(error.localizedDescription)")
+            }
+        }
+    }
+    #endif
 
     func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
         lockGestures()
@@ -190,13 +213,48 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         present(alert, animated: true)
     }
 
+    private enum ExportOutcome {
+        case saved(path: String, bytes: Int)
+        case shareFailed(path: String, bytes: Int, detail: String)
+        case canceled(path: String, bytes: Int)
+        case writeFailed(detail: String)
+
+        var payload: [String: Any] {
+            switch self {
+            case let .saved(path, bytes):
+                return ["ok": true, "saved": true, "canceled": false, "path": path, "bytes": bytes, "error": ""]
+            case let .shareFailed(path, bytes, detail):
+                return ["ok": false, "saved": true, "canceled": false, "path": path, "bytes": bytes, "error": detail]
+            case let .canceled(path, bytes):
+                return ["ok": false, "saved": true, "canceled": true, "path": path, "bytes": bytes, "error": ""]
+            case let .writeFailed(detail):
+                return ["ok": false, "saved": false, "canceled": false, "path": "", "bytes": 0, "error": detail]
+            }
+        }
+
+        var isFailure: Bool {
+            if case .writeFailed = self { return true }
+            if case .shareFailed = self { return true }
+            return false
+        }
+
+        var summary: String {
+            switch self {
+            case let .saved(path, bytes): return "已导出：\(path)（\(bytes)B）"
+            case let .shareFailed(path, _, detail): return "已保存，分享失败：\(path)（\(detail)）"
+            case let .canceled(path, _): return "已保存，未分享：\(path)"
+            case let .writeFailed(detail): return "导出失败：\(detail)"
+            }
+        }
+    }
+
     private func exportNativeOnly(reason: String) {
-        // 页面已经坏了，结果只能由原生自己弹出来
-        exportDiagnostics(pageText: nil, reason: reason) { [weak self] ok, detail in
+        exportDiagnostics(pageText: nil, reason: reason) { [weak self] outcome in
             guard let self else { return }
+            // 分享面板已经关了，这时才弹结果，避免 UIKit already presenting
             let alert = UIAlertController(
-                title: ok ? "诊断已导出" : "诊断导出失败",
-                message: detail,
+                title: outcome.isFailure ? "诊断导出失败" : "诊断已导出",
+                message: outcome.summary,
                 preferredStyle: .alert
             )
             alert.addAction(UIAlertAction(title: "好", style: .default))
@@ -204,9 +262,8 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         }
     }
 
-    /// 唯一导出实现：pageText 为 nil 表示页面不可用（原生故障入口）。
-    /// 两种来源都真的把文件交出去；notify 只决定结果从哪个渠道告诉用户。
-    private func exportDiagnostics(pageText: String?, reason: String, notify: ((Bool, String) -> Void)?) {
+    /// 唯一导出实现：两种来源都真把文件交出去，写入结果与分享结果分开报。
+    private func exportDiagnostics(pageText: String?, reason: String, notify: ((ExportOutcome) -> Void)?) {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
         let dir = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask)[0]
         let unique = UUID().uuidString.prefix(8)
@@ -219,28 +276,46 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         } catch {
             let ns = error as NSError
             let detail = "\(ns.domain)/\(ns.code): \(ns.localizedDescription)"
-            Diag.fail("导出诊断失败：\(detail)")
-            if let notify { notify(false, detail) }
-            else { js("onDiagExported(\(reportJSON(ok: false, path: "", bytes: 0, shareError: nil, error: detail)))") }
+            Diag.fail("导出诊断写入失败：\(detail)")
+            deliver(.writeFailed(detail: detail), notify: notify)
             return
         }
 
-        Diag.log("导出诊断 → \(url.lastPathComponent)（\(full.utf8.count)B）")
+        Diag.log("导出诊断已写入 \(url.lastPathComponent)（\(full.utf8.count)B）")
         let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         if let pop = share.popoverPresentationController {
             pop.sourceView = view
             pop.sourceRect = CGRect(x: view.bounds.midX, y: view.bounds.midY, width: 0, height: 0)
             pop.permittedArrowDirections = []
         }
-        if let notify {
-            share.completionWithItemsHandler = { _, completed, _, error in
-                let detail = error.map { "\(($0 as NSError).domain)/\(($0 as NSError).code): \($0.localizedDescription)" }
-                notify(true, detail ?? (completed ? url.path : url.path))
+        share.completionWithItemsHandler = { [weak self] _, completed, _, error in
+            let outcome: ExportOutcome
+            if let error {
+                let ns = error as NSError
+                outcome = .shareFailed(
+                    path: url.path,
+                    bytes: full.utf8.count,
+                    detail: "\(ns.domain)/\(ns.code): \(ns.localizedDescription)"
+                )
+            } else if completed {
+                outcome = .saved(path: url.path, bytes: full.utf8.count)
+            } else {
+                // 用户取消：文件留着，不宣称分享成功
+                outcome = .canceled(path: url.path, bytes: full.utf8.count)
             }
-        } else {
-            js("onDiagExported(\(reportJSON(ok: true, path: url.path, bytes: full.utf8.count, shareError: nil, error: nil)))")
+            Diag.log("导出分享结果：\(outcome.summary)")
+            guard let self else { return }
+            self.deliver(outcome, notify: notify)
         }
         present(share, animated: true)
+    }
+
+    private func deliver(_ outcome: ExportOutcome, notify: ((ExportOutcome) -> Void)?) {
+        if let notify {
+            notify(outcome)
+        } else {
+            js("onDiagExported(\(jsonText(outcome.payload)))")
+        }
     }
 
     private func lockGestures() {
@@ -283,12 +358,17 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                 Diag.fail("页面启动错误 \(text)")
             }
         case "appReady":
-            let ok = (message.body as? String)?.contains("\"ok\":true") ?? false
+            let raw = (message.body as? String) ?? "{}"
+            let data = raw.data(using: .utf8) ?? Data()
+            let info = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            let ok = info["ok"] as? Bool ?? false
+            let why = info["reason"] as? String ?? "unknown"
+            let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
-                Diag.log("页面已就绪")
+                Diag.log("页面已就绪（\(why) \(elapsed)ms）")
             } else {
-                Diag.fail("页面脚本 15 秒内没有就绪（模块未执行完）")
-                offerNativeExport(reason: "页面脚本没有就绪，页面日志可能不可用")
+                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）")
+                offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
             }
         case "exportDiag":
             guard let text = message.body as? String else { return }
@@ -302,14 +382,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         }
     }
 
-    private func reportJSON(ok: Bool, path: String, bytes: Int, shareError: String?, error: String?) -> String {
-        let payload: [String: Any] = [
-            "ok": ok,
-            "saved": ok,
-            "path": path,
-            "bytes": bytes,
-            "error": shareError ?? error ?? "",
-        ]
+    private func jsonText(_ payload: [String: Any]) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
     }

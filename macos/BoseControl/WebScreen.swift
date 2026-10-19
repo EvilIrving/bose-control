@@ -16,6 +16,13 @@ final class WebBundleHandler: NSObject, WKURLSchemeHandler {
     func webView(_ webView: WKWebView, start task: WKURLSchemeTask) {
         guard let url = task.request.url else { return }
         let rel = url.path.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+        // BOSE_DIAG_MISSING=1 时故意让 app.js 404，用于验证启动失败链路
+        if ProcessInfo.processInfo.environment["BOSE_DIAG_MISSING"] == "1", rel == "app.js" {
+            task.didFailWithError(NSError(domain: assetScheme, code: 404, userInfo: [
+                NSLocalizedDescriptionKey: "selftest: app.js 被故意拿掉",
+            ]))
+            return
+        }
         let file = root.appendingPathComponent(rel.isEmpty ? "index.html" : rel).standardizedFileURL
         guard file.path.hasPrefix(root.path), let data = try? Data(contentsOf: file) else {
             task.didFailWithError(NSError(domain: assetScheme, code: 404))
@@ -106,24 +113,23 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         var r = ev.reason;
         post('bootError', { kind: 'rejection', message: String((r && r.message) || r), stack: (r && r.stack) || '' });
       });
+      var t0 = Date.now();
       var reported = false;
-      function report(ok) {
+      function report(ok, why) {
         if (reported) return;
         reported = true;
-        post('appReady', { ok: ok });
+        post('appReady', { ok: ok, reason: why, elapsedMs: Date.now() - t0 });
       }
-      // 主路径：load 之后 0.8 秒确认一次，模块没挂上就是没起来（不靠长定时器）
+      // 主路径：load 之后 0.8 秒确认，模块没挂上就是没起来
       window.addEventListener('load', function () {
         setTimeout(function () {
-          if (window.__boseApp === true) report(true);
-          else report(false);
+          report(window.__boseApp === true, 'load-check');
         }, 800);
       });
-      // 兜底：load 一直不来的情况（资源卡住）也报
-      var tries = 0;
+      // 兜底：load 一直不来（资源卡住）也报，说明是兜底触发
       var timer = setInterval(function () {
-        if (window.__boseApp === true) { clearInterval(timer); report(true); }
-        else if (++tries > 150) { clearInterval(timer); report(false); }
+        if (window.__boseApp === true) { clearInterval(timer); report(true, 'poll'); }
+        else if (Date.now() - t0 > 15000) { clearInterval(timer); report(false, 'poll-timeout'); }
       }, 100);
     })();
     """
@@ -165,7 +171,54 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         #endif
         view.addSubview(web)
         web.load(URLRequest(url: URL(string: startURL)!))
+        #if DEBUG
+        scheduleSelfTestIfAsked()
+        #endif
     }
+
+    #if DEBUG
+    /// 只给自检用：BOSE_DIAG_SELFTEST=1 时跑完导出就退出，把真实文件路径打到 stdout。
+    private var selfTestMode: Bool { ProcessInfo.processInfo.environment["BOSE_DIAG_SELFTEST"] == "1" }
+
+    private func scheduleSelfTestIfAsked() {
+        guard selfTestMode else { return }
+        let out = ProcessInfo.processInfo.environment["BOSE_DIAG_OUT"] ?? "/tmp/bose-selftest.txt"
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
+            guard let self else { return }
+            let pageText = self.selfTestPageText()
+            self.exportToFile(url: URL(fileURLWithPath: out), pageText: pageText) { ok, detail in
+                print("SELFTEST ok=\(ok) detail=\(detail) file=\(out)")
+                exit(ok ? 0 : 1)
+            }
+        }
+    }
+
+    private func selfTestPageText() -> String {
+        let missing = ProcessInfo.processInfo.environment["BOSE_DIAG_MISSING"] == "1"
+        if missing {
+            return "页面未启动，页面日志不可用（selftest）"
+        }
+        var text = "# Bose Connector 诊断 selftest\n"
+        let sem = DispatchSemaphore(value: 0)
+        web.evaluateJavaScript("JSON.stringify({ ready: window.__boseApp === true, ua: navigator.userAgent })") { result, _ in
+            text += "page=\(result ?? "nil")\n"
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 3)
+        return text
+    }
+
+    private func exportToFile(url: URL, pageText: String, completion: @escaping (Bool, String) -> Void) {
+        let full = pageText + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+        do {
+            try full.write(to: url, atomically: true, encoding: .utf8)
+            completion(true, url.path)
+        } catch {
+            let ns = error as NSError
+            completion(false, "\(ns.domain)/\(ns.code): \(ns.localizedDescription)")
+        }
+    }
+    #endif
 
     func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
         reportLoadFailure("provisional", error)
@@ -188,6 +241,13 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     private func offerNativeExport(reason: String) {
+        #if DEBUG
+        if selfTestMode {
+            // 自检时不弹窗，结果由 scheduleSelfTestIfAsked 写到文件里
+            Diag.log("自检模式：跳过原生导出弹窗（\(reason)）")
+            return
+        }
+        #endif
         let alert = NSAlert()
         alert.messageText = "页面出问题了"
         alert.informativeText = reason + "\n可以导出一份原生日志，不依赖页面。"
@@ -285,12 +345,17 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
                 Diag.fail("页面启动错误 \(text)")
             }
         case "appReady":
-            let ok = (message.body as? String)?.contains("\"ok\":true") ?? false
+            let raw = (message.body as? String) ?? "{}"
+            let data = raw.data(using: .utf8) ?? Data()
+            let info = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+            let ok = info["ok"] as? Bool ?? false
+            let why = info["reason"] as? String ?? "unknown"
+            let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
-                Diag.log("页面已就绪")
+                Diag.log("页面已就绪（\(why) \(elapsed)ms）")
             } else {
-                Diag.fail("页面脚本 15 秒内没有就绪（模块未执行完）")
-                offerNativeExport(reason: "页面脚本没有就绪，页面日志可能不可用")
+                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）")
+                offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
             }
         case "exportDiag":
             guard let text = message.body as? String else { break }

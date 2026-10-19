@@ -52,9 +52,15 @@ class MainActivity : ComponentActivity() {
 
     /** null = 读不到（没有 LocationManager 或被系统拦），不要伪装成「已关闭」。 */
     fun locationEnabledOrNull(): Boolean? {
-        val lm = getSystemService(LocationManager::class.java) ?: return null
+        val lm = getSystemService(LocationManager::class.java)
+        if (lm == null) {
+            Diag.add("bt", "定位状态读不到：没有 LocationManager")
+            return null
+        }
         // isLocationEnabled() 是 API 28 才有的，minSdk 26 只能走 AndroidX 的兼容实现
-        return runCatching { LocationManagerCompat.isLocationEnabled(lm) }.getOrNull()
+        return runCatching { LocationManagerCompat.isLocationEnabled(lm) }.onFailure {
+            Diag.add("bt", "定位状态读取失败 ${it.javaClass.simpleName}: ${it.message}")
+        }.getOrNull()
     }
 
     /** 业务分支要确定的布尔：读不到按关闭处理，但要留一条日志。 */
