@@ -180,6 +180,7 @@ function exportText(result) {
       .replace("{error}", result.error || t("btUnknown"));
   if (result.state === "saved") return fill("exportSaved");
   if (result.state === "savedButShareFailed") return fill("exportShareFailed");
+  if (result.state === "canceled") return fill("exportCanceled");
   if (result.state === "unparsed") return t("exportUnparsed");
   return fill("exportFailed");
 }

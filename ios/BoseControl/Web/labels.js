@@ -81,6 +81,7 @@ export const LABELS = {
   exportSaved: { zh: "已导出：{path}（{bytes}B）", en: "Saved: {path} ({bytes}B)" },
   exportShareFailed: { zh: "已保存但分享失败：{path}（{error}）", en: "Saved but share failed: {path} ({error})" },
   exportFailed: { zh: "导出失败：{error}", en: "Export failed: {error}" },
+  exportCanceled: { zh: "已保存，未分享：{path}", en: "Saved, not shared: {path}" },
   exportUnparsed: { zh: "导出结果解析失败", en: "Could not read export result" },
   location: { zh: "定位", en: "Location" },
 

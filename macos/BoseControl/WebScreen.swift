@@ -177,45 +177,41 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     #if DEBUG
-    /// 只给自检用：BOSE_DIAG_SELFTEST=1 时跑完导出就退出，把真实文件路径打到 stdout。
+    /// 只给自检用：BOSE_DIAG_SELFTEST=1 时走真正的导出链路再退出，不另写一份 writer。
     private var selfTestMode: Bool { ProcessInfo.processInfo.environment["BOSE_DIAG_SELFTEST"] == "1" }
 
     private func scheduleSelfTestIfAsked() {
         guard selfTestMode else { return }
-        let out = ProcessInfo.processInfo.environment["BOSE_DIAG_OUT"] ?? "/tmp/bose-selftest.txt"
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak self] in
-            guard let self else { return }
-            let pageText = self.selfTestPageText()
-            self.exportToFile(url: URL(fileURLWithPath: out), pageText: pageText) { ok, detail in
-                print("SELFTEST ok=\(ok) detail=\(detail) file=\(out)")
-                exit(ok ? 0 : 1)
-            }
-        }
-    }
-
-    private func selfTestPageText() -> String {
         let missing = ProcessInfo.processInfo.environment["BOSE_DIAG_MISSING"] == "1"
         if missing {
-            return "页面未启动，页面日志不可用（selftest）"
+            // 页面已经坏了：走原生故障入口那条真实路径（exportDiagnostics(pageText: nil)）
+            DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+                guard let self else { return }
+                self.exportDiagnostics(pageText: nil, reason: "selftest: 页面未启动") { ok, detail in
+                    print("SELFTEST ok=\(ok) detail=\(detail)")
+                    exit(ok ? 0 : 1)
+                }
+            }
+            return
         }
-        var text = "# Bose Connector 诊断 selftest\n"
-        let sem = DispatchSemaphore(value: 0)
-        web.evaluateJavaScript("JSON.stringify({ ready: window.__boseApp === true, ua: navigator.userAgent })") { result, _ in
-            text += "page=\(result ?? "nil")\n"
-            sem.signal()
-        }
-        _ = sem.wait(timeout: .now() + 3)
-        return text
-    }
-
-    private func exportToFile(url: URL, pageText: String, completion: @escaping (Bool, String) -> Void) {
-        let full = pageText + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
-        do {
-            try full.write(to: url, atomically: true, encoding: .utf8)
-            completion(true, url.path)
-        } catch {
-            let ns = error as NSError
-            completion(false, "\(ns.domain)/\(ns.code): \(ns.localizedDescription)")
+        // 正常：从页面调 NativeBLE.exportDiag（= 设置页按钮那条路），原生走同一个 exportDiagnostics，
+        // 结果再经 onDiagExported 回到页面，最后读页面上的提示
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) { [weak self] in
+            guard let self else { return }
+            let js = "window.NativeBLE.exportDiag('# Bose Connector 诊断 selftest\\nready=' + (window.__boseApp === true))"
+            self.web.evaluateJavaScript(js) { _, error in
+                if let error {
+                    print("SELFTEST fail 触发导出出错：\(error.localizedDescription)")
+                    exit(1)
+                }
+            }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                self.web.evaluateJavaScript("(document.getElementById('diag-export-state')||{}).textContent || ''") { value, _ in
+                    let note = (value as? String) ?? ""
+                    print("SELFTEST note=\(note)")
+                    exit(note.contains("已导出") ? 0 : 1)
+                }
+            }
         }
     }
     #endif

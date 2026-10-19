@@ -42,6 +42,7 @@ export function exportResult(info) {
   // saved 说了算：老宿主只给 ok，就按 ok 当 saved
   const saved = typeof data.saved === "boolean" ? data.saved : data.ok === true;
   if (!saved) return { state: "failed", path, bytes, error };
+  if (data.canceled) return { state: "canceled", path, bytes, error: "" };
   if (error) return { state: "savedButShareFailed", path, bytes, error };
   return { state: "saved", path, bytes, error: "" };
 }
