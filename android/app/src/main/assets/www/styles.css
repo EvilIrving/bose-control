@@ -916,7 +916,8 @@ input.text:focus {
   display: none !important;
 }
 
-@media (min-width: 900px) {
+/* 断点压在桌面窗口的最小宽度（490）下面：分屏的 1/3、半屏都走桌面布局，手机仍是手机版 */
+@media (min-width: 480px) {
   html {
     height: 100%;
     overflow: hidden;

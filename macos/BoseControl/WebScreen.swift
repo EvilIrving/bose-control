@@ -137,7 +137,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag", "bootError", "appReady"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag", "bootError", "appReady", "diagLog"] {
             // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
@@ -272,7 +272,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         let unique = UUID().uuidString.prefix(8)
         let url = dir.appendingPathComponent("bose-diag-\(stamp)-\(unique).txt")
         let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
-        let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+        // 只从持久文件取历史 + 当前快照；内存日志仅在写盘失败时作为兜底附在后面
+        let full = Diag.exportTextSync(header: [head, "", "==== 原生 ====", Diag.systemInfo()])
 
         func finish(_ ok: Bool, _ detail: String) {
             Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)")
@@ -333,12 +334,14 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             // 页面自己轮询这一条（设备中心停留期间每 5 秒一次），只有内容变了才记一行
             if payload != lastDeviceList {
                 lastDeviceList = payload
-                Diag.log("js listDevices → \(payload)")
+                Diag.log("js listDevices → \(payload)", stage: "C")
             }
             js("onDeviceList('\(escape(payload))')")
+        case "diagLog":
+            if let text = message.body as? String { Diag.pageEvent(text) }
         case "bootError":
             if let text = message.body as? String {
-                Diag.fail("页面启动错误 \(text)")
+                Diag.fail("页面启动错误 \(text)", stage: "A")
             }
         case "appReady":
             let raw = (message.body as? String) ?? "{}"
@@ -348,9 +351,9 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             let why = info["reason"] as? String ?? "unknown"
             let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
-                Diag.log("页面已就绪（\(why) \(elapsed)ms）")
+                Diag.log("页面已就绪（\(why) \(elapsed)ms）", stage: "A")
             } else {
-                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）")
+                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）", stage: "A")
                 offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
             }
         case "exportDiag":
@@ -377,7 +380,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
       bleDisconnect: function (session) { window.webkit.messageHandlers.bleDisconnect.postMessage(session); },
       listDevices: function () { window.webkit.messageHandlers.listDevices.postMessage({}); },
       setBrand: function (id) { window.webkit.messageHandlers.setBrand.postMessage(String(id)); },
-      exportDiag: function (text) { window.webkit.messageHandlers.exportDiag.postMessage(String(text)); }
+      exportDiag: function (text) { window.webkit.messageHandlers.exportDiag.postMessage(String(text)); },
+      diagLog: function (json) { window.webkit.messageHandlers.diagLog.postMessage(String(json)); }
     };
     """
 

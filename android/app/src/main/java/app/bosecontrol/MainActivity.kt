@@ -87,6 +87,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Diag.start(applicationContext)
         val debuggable = (applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE) != 0
         WebView.setWebContentsDebuggingEnabled(debuggable)
 
@@ -111,12 +112,10 @@ class MainActivity : ComponentActivity() {
 
         web.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(msg: ConsoleMessage): Boolean {
-                val line = "[js] ${msg.message()} @${msg.sourceId()}:${msg.lineNumber()}"
-                Diag.add("web", line)
-                if (msg.messageLevel() == ConsoleMessage.MessageLevel.ERROR) {
-                    lastJsError = "${msg.message()} (:${msg.lineNumber()})"
-                    Diag.add("web", "页面报错 ${lastJsError}")
-                }
+                // 页面自己的事件走 diagLog 落盘；这里只补收 console 里的错误，避免一条记两次
+                if (msg.messageLevel() != ConsoleMessage.MessageLevel.ERROR) return true
+                lastJsError = "${msg.message()} (:${msg.lineNumber()})"
+                Diag.add("web", "页面报错 $lastJsError @${msg.sourceId()}")
                 return true
             }
         }

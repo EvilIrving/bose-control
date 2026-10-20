@@ -105,11 +105,23 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
 
 **不往界面上堆日志行。** 设置页「诊断」只放状态摘要 + 一个「导出诊断」按钮；排查问题靠导出的那份文本，不靠截图。
 
-- 页面：`web/log.js` 是唯一入口，`logLine(scope, msg)`，scope 固定几个短词（`app` / `hub` / `conn` / `tx` / `rx` / `nat` / `err`）。环形缓冲 3000 行，同时写 `console.debug`。全局 `error` / `unhandledrejection` 也接进去。
-- 三端原生各有一份同名 `Diag`：`Diag.add/log(...)` 一行 + 环形缓冲 2000 行，`dump()` 给导出用。
-  - Android：`BmapBridge.kt` 末尾的 `object Diag`，同时写 `adb logcat -s BOSE`。
-  - macOS：`RfcommClient.swift` 的 `enum Diag`（`os.Logger`，subsystem `cain.com.bosecontrol.mac`，全部 `privacy: .public`），同时写 stderr。
-  - iOS：`BleClient.swift` 的 `enum Diag`（subsystem `cain.com.bosecontrol`）。
+- **默认落盘，不靠用户导出**：三端原生各有一份 `Diag` 是唯一落盘 owner，启动最早处 `start()`
+  （macOS / iOS 在 `App.init`，Android 在 `onCreate`）。Android 写 `filesDir/diagnostics/logs`，
+  Apple 写 `Application Support/BoseControl/Diagnostics/logs`，都是私有目录，不写下载目录。
+- 记录格式 JSONL，一行一条：`timestamp`（ISO8601 带时区）、`runId`、`attemptId`（复用连接 session token）、
+  `source`（page / native）、`stage`（A–I）、`event`、`level`、`detail`。单文件 1MiB 滚动，
+  总量 10MiB、7 天过期，先到者淘汰，只清本目录 `*.jsonl`；坏尾行跳过并计数，不丢整份历史。
+- 页面 `web/log.js` 通过 `diagLog` 桥送结构化事件（Android `JavascriptInterface`，Apple `messageHandlers`），
+  断桥时退到内存 + `console.debug` 并标「未持久化」，不递归记录。Android 的 `onConsoleMessage`
+  只补收 ERROR，避免同一条记两次。
+- 写盘串行队列，每条立即写，不攒到导出；写失败保留有界内存兜底并在导出头部标 `health=write-failed`。
+- 导出只从持久文件读一致快照（排空写队列后），内存日志只在写盘失败时附加并明确标注；
+  头部含 runId / 目录 / health / 写失败数 / 文件与字节数 / 保留策略 / 坏行数。
+- 故障矩阵：A 启动与网页、B 权限与系统、C 设备中心、D 选择与连接、E BLE 配置、F SPP、G 协议收发、
+  H 生命周期、I 日志自身。关键失败必须能看出「哪一步、什么目标、原始错误、耗时、后续决定」，
+  不允许用 `timeout` 概括所有故障。
+- 验证：`sh scripts/verify-diag-persistence.sh`（强退重启可追溯 / 滚动淘汰 / 坏末行 / 写失败），
+  `sh scripts/verify-diag.sh`（页面出口与模块 404 两条导出路径），`tests/faults.test.mjs`（阶段字段）。
 - 页面起不来时也有出口：Android 的错误横幅本身可点（`bridge.exportDiag`），macOS / iOS 在加载失败或 WebView 进程被回收时弹原生提示，「导出诊断」只打包原生日志，不依赖页面。
 - 导出：页面把「系统信息 + 能力 + 设备列表 + 全流程日志」交给原生 `exportDiag(text)`，原生再拼上自己的系统信息和 `Diag.dump()` 写成 `.txt`：Android 存「下载」并调起分享，macOS 存 `~/Downloads` 并在 Finder 里选中，iOS 存 Documents 并弹分享面板。
 - 该记的东西：连接各阶段（transport / address / 通道打开耗时 / ready 耗时 / 首轮读完）、每条请求的 key 与超时、每次收发的字节数与分包方式、原生回调与 GATT/SPP 每一步、设备列表原样名字与品牌匹配结果、错误码。新增失败分支时必须补一条，写清「在哪一步、给了什么值、错误码是什么」。

@@ -118,7 +118,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag", "bootError", "appReady"] {
+        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag", "bootError", "appReady", "diagLog"] {
             // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
@@ -269,7 +269,8 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         let unique = UUID().uuidString.prefix(8)
         let url = dir.appendingPathComponent("bose-diag-\(stamp)-\(unique).txt")
         let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
-        let full = head + "\n\n==== 原生 ====\n" + Diag.systemInfo() + "\n\n" + Diag.dump() + "\n"
+        // 只从持久文件取历史 + 当前快照；内存日志只在写盘失败时兜底附上
+        let full = Diag.exportTextSync(header: [head, "", "==== 原生 ====", Diag.systemInfo()])
 
         do {
             try full.write(to: url, atomically: true, encoding: .utf8)
@@ -353,9 +354,11 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                   let body = (try? JSONSerialization.jsonObject(with: data)) as? [String: String],
                   body["session"] == session?.token, let hex = body["hex"] else { return }
             session?.client.send(hex: hex)
+        case "diagLog":
+            if let text = message.body as? String { Diag.pageEvent(text) }
         case "bootError":
             if let text = message.body as? String {
-                Diag.fail("页面启动错误 \(text)")
+                Diag.fail("页面启动错误 \(text)", stage: "A")
             }
         case "appReady":
             let raw = (message.body as? String) ?? "{}"
@@ -365,9 +368,9 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
             let why = info["reason"] as? String ?? "unknown"
             let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
-                Diag.log("页面已就绪（\(why) \(elapsed)ms）")
+                Diag.log("页面已就绪（\(why) \(elapsed)ms）", stage: "A")
             } else {
-                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）")
+                Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）", stage: "A")
                 offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
             }
         case "exportDiag":

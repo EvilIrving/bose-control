@@ -209,6 +209,12 @@ class BmapBridge(
         return "{\"platform\":\"android\",\"transports\":[\"ble\",\"spp\"],\"hub\":true}"
     }
 
+    /** 页面日志落盘：来源由原生补，字段缺省不报错 */
+    @JavascriptInterface
+    fun diagLog(json: String) {
+        Diag.pageEvent(json)
+    }
+
     /** 诊断用：系统/机型/权限/蓝牙开关/已配对台数，任何一项读不到都不抛。 */
     @JavascriptInterface
     fun env(): String {
@@ -290,7 +296,9 @@ class BmapBridge(
             val reason = runCatching {
                 val name = "bose-diag-" +
                     SimpleDateFormat("yyyyMMdd-HHmmss-SSS", Locale.US).format(Date()) + ".txt"
-                val full = text + "\n\n==== 原生 ====\n" + env() + "\n\n" + Diag.dump() + "\n"
+                // 只从持久文件取历史 + 当前快照；内存日志仅在写盘失败时兜底
+                val full = text + "\n\n==== 原生 ====\n" + Diag.systemInfo(activity) +
+                    "\n" + env() + "\n\n" + Diag.exportTextSync(listOf("==== 当前状态 ====")) + "\n"
                 val root = activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: activity.filesDir
                 val dir = File(root, "diagnostics").apply { mkdirs() }
                 val target = File(dir, name)
@@ -801,19 +809,202 @@ class BmapBridge(
 
 /** 全流程日志：logcat 一行 + 环形缓冲，导出诊断时整段带走。 */
 object Diag {
-    private const val MAX = 2000
     private const val TAG = "BOSE"
-    private val buffer = ArrayDeque<String>(MAX)
-    private val stamp = SimpleDateFormat("HH:mm:ss.SSS", Locale.US)
+    private const val MAX_MEMORY = 2000
 
+    private val memory = ArrayDeque<String>(MAX_MEMORY)
+    private val memoryLock = Any()
+    private val executor = java.util.concurrent.Executors.newSingleThreadExecutor { r ->
+        Thread(r, "diag-writer")
+    }
+    private val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSXXX", Locale.US)
+
+    @Volatile private var runId = ""
+    @Volatile private var health = "not-started"
+    @Volatile private var writeFailures = 0
+    private var dir: File? = null
+    private var stream: java.io.FileOutputStream? = null
+    private var fileBytes = 0L
+    private var fileSeq = 0
+    private var maxFileBytes = 1L shl 20
+    private var maxTotalBytes = 10L shl 20
+    private var maxAgeDays = 7
+    private var started = false
+
+    /** 启动最早处调用一次：建目录、清过期、开文件、写 run-start */
     @Synchronized
-    fun add(scope: String, message: String) {
-        val line = stamp.format(Date()) + " " + scope.padEnd(5) + " " + message
-        Log.d(TAG, line)
-        if (buffer.size >= MAX) buffer.removeFirst()
-        buffer.addLast(line)
+    fun start(context: android.content.Context) {
+        if (started) return
+        started = true
+        runId = "${System.currentTimeMillis() / 1000}-${android.os.Process.myPid()}"
+        val target = dir ?: File(File(context.filesDir, "diagnostics"), "logs")
+        executor.execute {
+            try {
+                target.mkdirs()
+                dir = target
+                removeExpired()
+                openNextFile()
+                health = "ok"
+            } catch (e: Exception) {
+                health = "write-failed: ${e.javaClass.simpleName}: ${e.message}"
+            }
+            append(
+                mapOf(
+                    "source" to "native", "stage" to "A", "event" to "run-start",
+                    "level" to "info", "detail" to systemInfo(context),
+                ),
+            )
+        }
     }
 
-    @Synchronized
-    fun dump(): String = buffer.joinToString("\n")
+    fun add(scope: String, message: String) {
+        Log.d(TAG, "$scope $message")
+        synchronized(memoryLock) {
+            if (memory.size >= MAX_MEMORY) memory.removeFirst()
+            memory.addLast("$scope $message")
+        }
+        append(mapOf("source" to "native", "stage" to "G", "event" to scope,
+            "level" to "info", "detail" to message))
+    }
+
+    /** 页面把结构化事件送进来（JSON 字符串） */
+    fun pageEvent(json: String) {
+        val parsed = runCatching { org.json.JSONObject(json) }.getOrNull()
+        if (parsed == null) {
+            append(mapOf("source" to "page", "stage" to "I", "event" to "bad-payload",
+                "level" to "error", "detail" to json.take(200)))
+            return
+        }
+        val map = mutableMapOf<String, Any?>()
+        parsed.keys().forEach { key -> map[key] = parsed.opt(key) }
+        map["source"] = "page"
+        append(map)
+    }
+
+    fun dump(): String = synchronized(memoryLock) { memory.joinToString("\n") }
+
+    fun infoJson(): String = org.json.JSONObject()
+        .put("runId", runId)
+        .put("dir", dir?.absolutePath ?: "")
+        .put("health", health)
+        .put("writeFailures", writeFailures)
+        .put("files", listFiles().joinToString(",") { it.name })
+        .toString()
+
+    /** 写盘队列排空后读一致快照：只读磁盘；写盘失败时才把内存兜底附上 */
+    fun exportTextSync(header: List<String>): String {
+        val future = executor.submit<String> {
+            val files = listFiles()
+            val lines = mutableListOf<String>()
+            var corrupt = 0
+            for (file in files) {
+                runCatching {
+                    file.forEachLine { line ->
+                        if (line.isBlank()) return@forEachLine
+                        val ok = runCatching { org.json.JSONObject(line) }.isSuccess
+                        if (ok) lines.add(line) else corrupt++
+                    }
+                }
+            }
+            val meta = listOf(
+                "runId=$runId",
+                "dir=${dir?.absolutePath ?: ""}",
+                "health=$health",
+                "writeFailures=$writeFailures",
+                "files=${files.size}",
+                "bytes=${files.sumOf { it.length() }}",
+                "retention=maxFile=${maxFileBytes}B total=${maxTotalBytes}B age=${maxAgeDays}d",
+                "corruptLines=$corrupt",
+                "memoryFallback=${if (health == "ok") "not-used" else "recent ${synchronized(memoryLock) { memory.size }} lines kept in memory only"}",
+            )
+            val out = mutableListOf<String>()
+            out.addAll(header)
+            out.addAll(meta)
+            out.add("")
+            out.add("==== 持久日志（JSONL，按时间顺序） ====")
+            out.addAll(lines)
+            if (health != "ok") {
+                out.add("")
+                out.add("==== 仅供兜底的内存日志（未持久化） ====")
+                out.addAll(synchronized(memoryLock) { memory.toList() })
+            }
+            out.joinToString("\n")
+        }
+        return runCatching { future.get(5, java.util.concurrent.TimeUnit.SECONDS) }
+            .getOrElse { (header + "（读取持久日志失败：${it.message}）").joinToString("\n") }
+    }
+
+    fun systemInfo(context: android.content.Context?): String {
+        val pkg = context?.packageManager?.let {
+            runCatching { it.getPackageInfo(context.packageName, 0) }.getOrNull()
+        }
+        val version = pkg?.versionName ?: "?"
+        return "Android ${Build.VERSION.RELEASE} (sdk ${Build.VERSION.SDK_INT}) / " +
+            "${Build.MANUFACTURER} ${Build.MODEL} / app $version"
+    }
+
+    private fun append(dict: Map<String, Any?>) {
+        executor.execute { appendLocked(dict) }
+    }
+
+    private fun appendLocked(dict: Map<String, Any?>) {
+        val record = org.json.JSONObject()
+        runCatching {
+            dict.forEach { (k, v) -> if (v != null) record.put(k, v) }
+            record.put("timestamp", iso.format(Date()))
+            record.put("runId", runId)
+        }.onFailure { return }
+        val line = record.toString() + "\n"
+        val out = stream
+        if (out == null) {
+            writeFailures++
+            health = "write-failed: no stream"
+            return
+        }
+        runCatching {
+            out.write(line.toByteArray())
+            out.flush()
+            fileBytes += line.toByteArray().size
+            if (fileBytes >= maxFileBytes) rotate()
+        }.onFailure { e ->
+            writeFailures++
+            health = "write-failed: ${e.javaClass.simpleName}: ${e.message}"
+            Log.e(TAG, "日志写盘失败 ${e.message}")
+        }
+    }
+
+    private fun openNextFile() {
+        val base = dir ?: return
+        fileSeq++
+        val file = File(base, String.format(Locale.US, "diag-%s-%03d.jsonl", runId, fileSeq))
+        stream = java.io.FileOutputStream(file, true)
+        fileBytes = file.length()
+    }
+
+    private fun rotate() {
+        runCatching { stream?.close() }
+        stream = null
+        openNextFile()
+        removeExpired()
+    }
+
+    private fun listFiles(): List<File> {
+        val base = dir ?: return emptyList()
+        return base.listFiles { f -> f.isFile && f.name.endsWith(".jsonl") }
+            ?.sortedBy { it.lastModified() } ?: emptyList()
+    }
+
+    /** 只清理本目录的 jsonl：先按天数，再按总量淘汰最旧 */
+    private fun removeExpired() {
+        var files = listFiles()
+        if (maxAgeDays >= 0) {
+            val cutoff = System.currentTimeMillis() - maxAgeDays * 86400_000L
+            files.filter { it.lastModified() < cutoff }.forEach { it.delete() }
+            files = listFiles()
+        }
+        while (files.sumOf { it.length() } > maxTotalBytes && files.isNotEmpty()) {
+            files.first().delete()
+            files = files.drop(1)
+        }
+    }
 }

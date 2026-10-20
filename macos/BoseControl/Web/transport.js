@@ -258,12 +258,12 @@ export class HeadsetLink {
     // 每片标出 offset / 总长 / 本帧序号，按序号拼回去就是原始流
     const seq = (this._rxSeq = (this._rxSeq ?? 0) + 1);
     if (chunk.length <= 128) {
-      logLine("rx", `raw #${seq} 0-${chunk.length}/${chunk.length}B ${hex}`);
+      logLine("rx", `raw #${seq} 0-${chunk.length}/${chunk.length}B ${hex}`, { attemptId: this._token });
     } else {
       for (let off = 0; off < hex.length; off += 256) {
         const from = off / 2;
         const to = Math.min(chunk.length, from + 128);
-        logLine("rx", `raw #${seq} ${from}-${to}/${chunk.length}B ${hex.slice(off, off + 256)}`);
+        logLine("rx", `raw #${seq} ${from}-${to}/${chunk.length}B ${hex.slice(off, off + 256)}`, { attemptId: this._token });
       }
     }
     let packets;
@@ -271,14 +271,17 @@ export class HeadsetLink {
       packets = this.codec.parse(chunk, this.link);
     } catch (error) {
       // 记录后原样抛出：解析失败不能被悄悄变成「这条请求超时」
-      logLine("err", `parse 抛错 ${error.message}（#${seq} ${chunk.length}B）\n${error.stack ?? ""}`);
+      logLine("err", `parse 抛错 ${error.message}（#${seq} ${chunk.length}B）\n${error.stack ?? ""}`, { attemptId: this._token });
       throw error;
     }
     if (!packets.length) logLine("rx", `未成帧（#${seq}），等后续字节`);
     for (const packet of packets) {
       const key = this.codec.key(packet);
       const waited = this.pending.has(key);
-      logLine("rx", `key=${key} ${packet.byteLength ?? packet.length ?? "?"}B ${waited ? "有等待项" : "无等待项"}`);
+      logLine("rx", waited ? `key=${key} ${packet.byteLength ?? packet.length ?? "?"}B 有等待项`
+        : `unexpected-packet key=${key} ${packet.byteLength ?? packet.length ?? "?"}B 没有等待项`,
+      { attemptId: this._token, event: waited ? "rx" : "unexpected-packet",
+        level: waited ? "info" : "warn" });
       this.pending.get(key)?.finish(null, packet);
       this.onPacket?.(packet);
     }
@@ -296,7 +299,7 @@ export class HeadsetLink {
       onSend();
       const chunks = this.codec.chunks(packetBytes, this.link);
       const via = this.bridge ? "bridge" : this.nativeOn ? "native" : "webble";
-      logLine("tx", `write ${packetBytes.length}B → ${chunks.length} 包 via ${via} key=${this.codec.key(this.codec.header(packetBytes))}`);
+      logLine("tx", `write ${packetBytes.length}B → ${chunks.length} 包 via ${via} key=${this.codec.key(this.codec.header(packetBytes))}`, { attemptId: this._token });
       for (const chunk of chunks) {
         this._check(epoch);
         if (this.bridge) this.bridge.send(chunk);
@@ -353,13 +356,17 @@ export class HeadsetLink {
     };
     this.pending.set(job.key, { finish });
     const started = Date.now();
+    const framesAtStart = this._rxSeq ?? 0;
     this.write(job.packetBytes, () => {
       if (!settled) timer = setTimeout(() => {
-        logLine("tx", `key=${job.key} 超时 ${job.timeoutMs}ms（已等 ${Date.now() - started}ms）`);
+        // 超时要能分清：这一条期间一帧都没收到，还是收到了但没配对
+        logLine("tx", `timeout key=${job.key} limit=${job.timeoutMs}ms elapsed=${Date.now() - started}ms framesSinceRequest=${(this._rxSeq ?? 0) - framesAtStart}`, {
+          attemptId: this._token, event: "request-timeout", level: "error",
+        });
         finish(new Error(`超时 ${job.key}`));
       }, job.timeoutMs);
     }).catch((error) => {
-      logLine("tx", `key=${job.key} 写失败 ${error.message}`);
+      logLine("tx", `key=${job.key} 写失败 ${error.message}`, { attemptId: this._token });
       finish(error);
     });
   }

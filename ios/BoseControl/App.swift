@@ -2,6 +2,11 @@ import SwiftUI
 
 @main
 struct BoseControlApp: App {
+    init() {
+        // 启动最早处准备持久日志
+        Diag.start()
+    }
+
     var body: some Scene {
         WindowGroup {
             ZStack {

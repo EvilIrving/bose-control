@@ -44,7 +44,7 @@ import {
 } from "./bmap.js";
 import { HeadsetLink, isCancelled } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandForName, bridgeAvailable, brandsHere, missingCapabilities, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
+import { brandById, brandEnabled, brandForName, brandList, bridgeAvailable, brandsHere, missingCapabilities, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
 import { setUnverified, unverifiedOn } from "./experimental.js";
@@ -67,7 +67,7 @@ import {
 } from "./labels.js";
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
-import { logCount, logLine, logText } from "./log.js";
+import { logCount, logLine, logSnapshot } from "./log.js";
 import { btStateKey, exportResult, locationKey } from "./diag.js";
 import { brandLogoSvg } from "./logos.js";
 
@@ -273,9 +273,13 @@ function exportDiag() {
     `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
       (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
     `不支持 ${missingCapabilities().join(" / ") || "无"}`,
-    `日志 ${logCount()} 行（上限 3000，超出从头丢）`,
+    `页面日志 ${logCount()} 行（内存兜底，历史以原生持久文件为准）`,
   ];
-  const text = logText(header);
+  const snap = logSnapshot();
+  header.push(`页面落盘 ${snap.persisted ? "正常" : "不可用"}`,
+    `最近 20 行（仅快照，完整历史见下）`,
+    ...snap.recent);
+  const text = header.join("\n");
   log(`导出诊断 ${text.length} 字符`);
   try {
     nativeCall("exportDiag", text);
@@ -534,8 +538,18 @@ let droppedSig = "";
 // 原生给到的配对表识别结果，固定留在诊断里：日志区会被耳机读取淹没，丢了就查不到
 let peerDiag = { total: 0, matched: 0, dropped: [] };
 
+// 少一台时最需要知道的是「为什么」，不是「少了几台」
+function exclusionReason(name) {
+  const n = String(name || "").trim();
+  if (!n) return "no-name";
+  const any = brandList().find((brand) => brand.matches(n));
+  if (!any) return "no-match";
+  return brandEnabled(any) ? "unexpected" : "brand-disabled";
+}
+
 window.onDeviceList = (json) => {
   peerPending = false;
+  const startedAt = performance.now();
   let rows = [];
   try {
     rows = JSON.parse(json);
@@ -546,8 +560,20 @@ window.onDeviceList = (json) => {
   // 但要在诊断里留一行：少一台时得能分清是原生没给、还是给了但没认上
   const dropped = rows.filter((peer) => !brandForName(peer.name)).map((peer) => peer.name || peer.address);
   peerDiag = { total: rows.length, matched: rows.length - dropped.length, dropped };
-  logLine("hub", `list ${rows.length} 台，认得 ${peerDiag.matched}：` +
-    rows.map((p) => `${p.name || "(无名)"}@${p.address || "-"}=${brandForName(p.name)?.id ?? "?"}`).join(" | "));
+  logLine("hub", `enumerate-end 原生给了 ${rows.length} 台，认得 ${peerDiag.matched}`, {
+    stage: "C", event: "enumerate-end",
+    detail: rows.map((p) => `${p.name || "(无名)"}@${p.address || "-"}=${brandForName(p.name)?.id ?? "no-match"}`).join(" | ")
+      + ` 用时=${Math.round(performance.now() - startedAt)}ms`,
+  });
+  // 逐台写排除原因：以后少一台，直接看是没名字、没匹配还是品牌被关掉
+  for (const row of rows) {
+    if (brandForName(row.name)) continue;
+    const reason = exclusionReason(row.name);
+    logLine("hub", `excluded ${row.name || "(无名)"}@${row.address || "-"} reason=${reason}`, {
+      stage: "C", event: "device-excluded", level: "info",
+      detail: `${reason} name=${row.name || ""} address=${row.address || ""}`,
+    });
+  }
   // 设置页开着的时候列表还在轮询，识别结果要跟着更新
   if (ui.settings.classList.contains("open")) renderDiag();
   const droppedNow = dropped.join("\u0000");
@@ -616,6 +642,8 @@ async function connect(peer = null) {
   const current = new HeadsetLink(brand.codec());
   link = current;
   const started = performance.now();
+  logLine("conn", `attempt-start brand=${brand.id} transport=${transportFor(brand)} address=${peer?.address ?? "-"} services=${(brand.services ?? []).length} channels=${(brand.channels ?? []).join(",")}`,
+    { stage: "D", event: "attempt-start", attemptId: peer?.address ?? null });
   const elapsed = () => Math.round(performance.now() - started);
   current.onDisconnected = () => {
     if (link !== current) return;
@@ -666,7 +694,9 @@ async function connect(peer = null) {
     }
   } catch (err) {
     if (link !== current || isCancelled(err)) return;
-    log(err.message);
+    // 原始错误码单独留一份：界面用映射后的文案，排查要能看见原话
+    logLine("conn", `attempt-failed code=${linkOf(err)} raw=${err.message} elapsed=${Math.round(performance.now() - started)}ms`,
+      { stage: "D", event: "attempt-failed", level: "error", attemptId: peer?.address ?? null });
     current.disconnect(err);
     state.link = linkOf(err);
     setPage("devices");
@@ -679,6 +709,7 @@ async function connect(peer = null) {
 }
 
 function disconnect() {
+  logLine("conn", "disconnect by=user", { stage: "H", event: "disconnect" });
   state.link = "idle";
   link.disconnect();
   state.busy = false;

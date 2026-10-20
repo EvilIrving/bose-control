@@ -7,32 +7,104 @@ import os
 enum Diag {
     static let subsystem = "cain.com.bosecontrol"
     private static let logger = Logger(subsystem: subsystem, category: "bt")
-    private static let maxLines = 2000
-    private static var buffer: [String] = []
-    private static let lock = NSLock()
-    private static let stamp: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "HH:mm:ss.SSS"
+
+    private static let maxMemory = 2000
+    private static var memory: [String] = []
+    private static let memoryLock = NSLock()
+
+    private static let writeQueue = DispatchQueue(label: "diag.write")
+    private static let iso: ISO8601DateFormatter = {
+        let f = ISO8601DateFormatter()
+        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds, .withTimeZone]
         return f
     }()
+    private static var runId = ""
+    private static var logDir: URL?
+    private static var handle: FileHandle?
+    private static var fileBytes = 0
+    private static var fileSeq = 0
+    private static var maxFileBytes = 1 << 20
+    private static var maxTotalBytes = 10 << 20
+    private static var maxAgeDays = 7
+    private static var health = "not-started"
+    private static var writeFailures = 0
+    private static var started = false
 
-    static func log(_ text: String) {
-        logger.notice("\(text, privacy: .public)")
-        remember("I " + text)
+    static var centralState = "not-observed"
+
+    static func start() {
+        memoryLock.lock()
+        if started { memoryLock.unlock(); return }
+        started = true
+        memoryLock.unlock()
+
+        #if DEBUG
+        let env = ProcessInfo.processInfo.environment
+        if let v = env["BOSE_DIAG_MAX_FILE"], let n = Int(v) { maxFileBytes = max(512, n) }
+        if let v = env["BOSE_DIAG_MAX_TOTAL"], let n = Int(v) { maxTotalBytes = max(1024, n) }
+        if let v = env["BOSE_DIAG_MAX_DAYS"], let n = Int(v) { maxAgeDays = max(0, n) }
+        #endif
+
+        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+        #if DEBUG
+        let dir = ProcessInfo.processInfo.environment["BOSE_DIAG_DIR"].map {
+            URL(fileURLWithPath: $0, isDirectory: true)
+        } ?? base.appendingPathComponent("BoseControl/Diagnostics/logs", isDirectory: true)
+        #else
+        let dir = base.appendingPathComponent("BoseControl/Diagnostics/logs", isDirectory: true)
+        #endif
+        runId = "\(Int(Date().timeIntervalSince1970))-\(ProcessInfo.processInfo.processIdentifier)"
+        writeQueue.sync {
+            do {
+                try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+                logDir = dir
+                removeExpired()
+                openNextFile()
+                health = "ok"
+            } catch {
+                health = "write-failed: \(error.localizedDescription)"
+            }
+            appendLocked(["source": "native", "stage": "A", "event": "run-start",
+                          "level": "info", "detail": systemInfo()])
+        }
     }
 
-    static func fail(_ text: String) {
+    static func info() -> [String: Any] {
+        writeQueue.sync {
+            ["runId": runId, "dir": logDir?.path ?? "", "health": health,
+             "writeFailures": writeFailures, "files": listFiles().map { $0.lastPathComponent }]
+        }
+    }
+
+    static func log(_ text: String, stage: String = "G", attemptId: String? = nil) {
+        logger.notice("\(text, privacy: .public)")
+        remember("I " + text)
+        publish(source: "native", stage: stage, event: text, level: "info", attemptId: attemptId)
+    }
+
+    static func fail(_ text: String, stage: String = "G", attemptId: String? = nil) {
         logger.error("\(text, privacy: .public)")
         remember("E " + text)
+        publish(source: "native", stage: stage, event: text, level: "error", attemptId: attemptId)
+    }
+
+    static func pageEvent(_ json: String) {
+        guard let data = json.data(using: .utf8),
+              var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            publish(source: "page", stage: "I", event: "bad-payload", level: "error",
+                    detail: String(json.prefix(200)), attemptId: nil)
+            return
+        }
+        dict["source"] = "page"
+        append(dict)
     }
 
     static func dump() -> String {
-        lock.lock()
-        defer { lock.unlock() }
-        return buffer.joined(separator: "\n")
+        memoryLock.lock()
+        defer { memoryLock.unlock() }
+        return memory.joined(separator: "\n")
     }
-
-    static var centralState = "not-observed"
 
     static func systemInfo() -> String {
         let info = Bundle.main.infoDictionary ?? [:]
@@ -50,12 +122,136 @@ enum Diag {
             " / central=\(centralState) auth=\(auth)"
     }
 
+    static func exportTextSync(header: [String]) -> String {
+        var result = ""
+        let sem = DispatchSemaphore(value: 0)
+        writeQueue.async {
+            let files = listFiles()
+            var lines: [String] = []
+            var corrupt = 0
+            for file in files {
+                guard let text = try? String(contentsOf: file, encoding: .utf8) else { continue }
+                for line in text.split(separator: "\n", omittingEmptySubsequences: true) {
+                    if (try? JSONSerialization.jsonObject(with: Data(line.utf8))) != nil {
+                        lines.append(String(line))
+                    } else {
+                        corrupt += 1
+                    }
+                }
+            }
+            let meta = [
+                "runId=\(runId)",
+                "dir=\(logDir?.path ?? "")",
+                "health=\(health)",
+                "writeFailures=\(writeFailures)",
+                "files=\(files.count)",
+                "bytes=\(files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) })",
+                "retention=maxFile=\(maxFileBytes)B total=\(maxTotalBytes)B age=\(maxAgeDays)d",
+                "corruptLines=\(corrupt)",
+                "memoryFallback=\(health == "ok" ? "not-used" : "recent \(memory.count) lines kept in memory only")",
+            ]
+            var out = header + meta + ["", "==== 持久日志（JSONL，按时间顺序） ===="]
+            out.append(contentsOf: lines)
+            if health != "ok" {
+                memoryLock.lock()
+                let recent = memory
+                memoryLock.unlock()
+                out.append(contentsOf: ["", "==== 仅供兜底的内存日志（未持久化） ===="] + recent)
+            }
+            result = out.joined(separator: "\n")
+            sem.signal()
+        }
+        _ = sem.wait(timeout: .now() + 5)
+        return result.isEmpty ? (header + ["（读取持久日志超时）"]).joined(separator: "\n") : result
+    }
+
     private static func remember(_ text: String) {
-        let line = stamp.string(from: Date()) + " " + text
-        lock.lock()
-        buffer.append(line)
-        if buffer.count > maxLines { buffer.removeFirst(buffer.count - maxLines) }
-        lock.unlock()
+        memoryLock.lock()
+        memory.append(text)
+        if memory.count > maxMemory { memory.removeFirst(memory.count - maxMemory) }
+        memoryLock.unlock()
+    }
+
+    private static func publish(source: String, stage: String, event: String, level: String,
+                                detail: String? = nil, attemptId: String?) {
+        var dict: [String: Any] = ["source": source, "stage": stage, "event": event, "level": level]
+        if let detail { dict["detail"] = detail }
+        if let attemptId { dict["attemptId"] = attemptId }
+        append(dict)
+    }
+
+    private static func append(_ dict: [String: Any]) {
+        writeQueue.async { appendLocked(dict) }
+    }
+
+    private static func appendLocked(_ dict: [String: Any]) {
+        var record = dict
+        record["timestamp"] = iso.string(from: Date())
+        record["runId"] = runId
+        // 不转义斜杠：日志里的 URL 要能直接读
+        guard let data = try? JSONSerialization.data(withJSONObject: record, options: [.withoutEscapingSlashes]),
+              var line = String(data: data, encoding: .utf8) else { return }
+        line += "\n"
+        guard let handle else {
+            writeFailures += 1
+            health = "write-failed: no handle"
+            return
+        }
+        do {
+            try handle.write(contentsOf: Data(line.utf8))
+            fileBytes += line.utf8.count
+            if fileBytes >= maxFileBytes { rotate() }
+        } catch {
+            writeFailures += 1
+            health = "write-failed: \(error.localizedDescription)"
+            remember("E 写盘失败 \(error.localizedDescription)")
+        }
+    }
+
+    private static func openNextFile() {
+        guard let dir = logDir else { return }
+        fileSeq += 1
+        let url = dir.appendingPathComponent(String(format: "diag-%@-%03d.jsonl", runId, fileSeq))
+        FileManager.default.createFile(atPath: url.path, contents: nil)
+        handle = try? FileHandle(forWritingTo: url)
+        fileBytes = 0
+    }
+
+    private static func rotate() {
+        try? handle?.close()
+        handle = nil
+        openNextFile()
+        removeExpired()
+    }
+
+    private static func listFiles() -> [URL] {
+        guard let dir = logDir else { return [] }
+        let urls = (try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+            options: [.skipsHiddenFiles])) ?? []
+        return urls.filter { $0.pathExtension == "jsonl" }.sorted { a, b in
+            let da = (try? a.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            let db = (try? b.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? .distantPast
+            return da < db
+        }
+    }
+
+    private static func removeExpired() {
+        var files = listFiles()
+        if maxAgeDays >= 0 {
+            let cutoff = Date().addingTimeInterval(-Double(maxAgeDays) * 86400)
+            for file in files {
+                let date = (try? file.resourceValues(forKeys: [.contentModificationDateKey]).contentModificationDate) ?? Date()
+                if date < cutoff { try? FileManager.default.removeItem(at: file) }
+            }
+            files = listFiles()
+        }
+        func total() -> Int {
+            files.reduce(0) { $0 + ((try? $1.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0) }
+        }
+        while total() > maxTotalBytes && !files.isEmpty {
+            try? FileManager.default.removeItem(at: files.removeFirst())
+        }
     }
 }
 

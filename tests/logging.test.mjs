@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 globalThis.window = globalThis;
-const { logCount, logLine, logText } = await import("../web/log.js");
+const { logCount, logLine, logSnapshot } = await import("../web/log.js");
 
 // transport 里 logLine 走 console.debug，测试期间截下来看内容
 function capture(fn) {
@@ -18,20 +18,49 @@ function capture(fn) {
   return seen;
 }
 
-test("日志有上限，超出从最早的丢", () => {
-  const before = logCount();
-  for (let i = 0; i < 3200; i += 1) logLine("test", `第 ${i} 行`);
-  assert.equal(logCount(), 3000);
-  const text = logText();
-  assert.ok(text.includes("第 3199 行"), "最新的还在");
-  assert.ok(!text.includes("第 0 行"), "最早的已经丢掉");
-  assert.ok(before >= 0);
+test("页面日志有内存上限，超出从最早的丢", () => {
+  for (let i = 0; i < 2400; i += 1) logLine("test", `第 ${i} 行`);
+  assert.equal(logCount(), 2000);
+  const snap = logSnapshot();
+  assert.equal(snap.memoryLines, 2000);
+  assert.ok(snap.recent.some((line) => line.includes("第 2399 行")), "最新的还在");
+  assert.ok(!snap.recent.some((line) => line.includes("第 0 行")), "最早的已经丢掉");
 });
 
-test("logText 带抬头，header 在日志之前", () => {
-  const text = logText(["# 抬头", "第二行"]);
-  assert.ok(text.startsWith("# 抬头\n第二行"));
-  assert.ok(text.includes("---- 日志"));
+test("没有原生桥时标记为未持久化，并且不递归", () => {
+  const saved = globalThis.NativeBLE;
+  const savedDebug = console.debug;
+  globalThis.NativeBLE = undefined;
+  let printed = 0;
+  console.debug = () => { printed += 1; };
+  try {
+    logLine("app", "断桥一行");
+    const snap = logSnapshot();
+    assert.equal(snap.persisted, false);
+    assert.equal(snap.bridgeDown, true);
+    assert.ok(printed >= 1, "断桥时退到 console");
+  } finally {
+    globalThis.NativeBLE = saved;
+    console.debug = savedDebug;
+  }
+});
+
+test("原生桥接住事件时标记为已持久化", () => {
+  const saved = globalThis.NativeBLE;
+  const seen = [];
+  globalThis.NativeBLE = { diagLog: (json) => seen.push(JSON.parse(json)) };
+  try {
+    logLine("conn", "连接开始", { attemptId: "s-1", event: "connect-start" });
+    const snap = logSnapshot();
+    assert.equal(snap.persisted, true);
+    const event = seen.at(-1);
+    assert.equal(event.stage, "D");
+    assert.equal(event.attemptId, "s-1");
+    assert.equal(event.event, "connect-start");
+    assert.equal(event.source, undefined, "source 由原生补");
+  } finally {
+    globalThis.NativeBLE = saved;
+  }
 });
 
 test("收包先落原始字节：80 字节完整留着，不截断", async () => {
