@@ -17,7 +17,6 @@ import {
   parseBattery,
   parseCnc,
   parseConversation,
-  parseDeviceList,
   parseEq,
   parseFavorites,
   parseFirmware,
@@ -425,16 +424,6 @@ function renderRename() {
   if (document.activeElement !== input) input.value = state.name;
 }
 
-function renderDevices() {
-  if (link.active === false) return;
-  pane(ui.devices, state.devices.length > 0);
-  if (!state.devices.length) return;
-  fillRows(
-    ui.devices,
-    state.devices.map((device) => [device.mac, device.connected ? t("connected") : "—"]),
-  );
-}
-
 function renderHeadset() {
   if (link.active === false) return;
   ui.headset.innerHTML = "";
@@ -480,6 +469,8 @@ function applyCnc(reply) {
 
 async function loadDevice() {
   retries = [];
+  // 「已配对设备」是耳机自己的配对表，对控制没用，Bose 这边不再显示也不再读
+  if (ui.devices) pane(ui.devices, false);
   // 第一批：屏幕上立刻要看的东西。彼此不依赖，一起飞，屏幕不再等全量读完才出内容。
   const [versionReply] = await Promise.all([
     tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", READ_TIMEOUT),
@@ -539,9 +530,6 @@ async function loadDevice() {
     }),
     read(get(FBLOCK.SETTINGS, FUNC.BUTTONS), "快捷", (reply) => {
       state.shortcut = parseActionButton(reply.payload);
-    }),
-    read(get(FBLOCK.DEVICE, FUNC.DEVICE_LIST), "设备列表", (reply) => {
-      state.devices = parseDeviceList(reply.payload);
     }),
     read(get(FBLOCK.AUDIO, FUNC.TRANSPORT), "播放", () => {
       state.hasTransport = true;
@@ -1042,7 +1030,6 @@ async function setAutoPlayPause(on) {
     renderVoice();
     renderBehaviour();
     renderStandby();
-    renderDevices();
     renderHeadset();
   }
 

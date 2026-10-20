@@ -38,9 +38,11 @@ test("Bose EQ 已回时即可使用，不等慢模式与设置；完整探测保
   release();
   assert.equal(await loading, true);
   await tick();
-  for (const command of ["1.11", "1.3", "1.9", "4.4", "5.3", "31.2", "31.6"]) {
+  for (const command of ["1.11", "1.3", "1.9", "5.3", "31.2", "31.6"]) {
     assert.ok(sent.includes(command), `original capability still probed: ${command}`);
   }
+  // 「已配对设备」不再显示，也不再读耳机自己的配对表
+  assert.ok(!sent.includes("4.4"), "device list 不该再被请求");
 });
 
 test("华为 EQ 已回时即可使用，不等语音和音质偏好", async () => {

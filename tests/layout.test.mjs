@@ -31,5 +31,5 @@ test("模式行不再靠截断塞进一行", () => {
 });
 
 test("分段控件放不下时也横向滑，按钮不缩到看不见", () => {
-  assert.match(rule("\\.levels button"), /flex: 1 0 auto/);
+  assert.match(css, /\.levels button \{[^}]*flex: 1 0 auto/);
 });
