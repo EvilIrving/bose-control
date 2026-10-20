@@ -92,6 +92,7 @@ const ui = {
   lang: $("lang"),
   settings: $("settings"),
   settingsOpen: $("settings-open"),
+  settingsOpenHome: $("settings-open-home"),
   settingsClose: $("settings-close"),
   diagActions: $("diag-actions"),
   toggles: $("toggles"),
@@ -223,6 +224,7 @@ function applyLabels() {
   ui.deviceTrigger.setAttribute("aria-label", t("switchDevice"));
   ui.deviceMenu.setAttribute("aria-label", t("switchDevice"));
   ui.back.title = t("back");
+  ui.settingsOpenHome.setAttribute("aria-label", t("settings"));
 }
 
 function renderInfo() {
@@ -785,6 +787,8 @@ function closeSettings() {
 }
 
 ui.settingsOpen.addEventListener("click", openSettings);
+// 首页也能进设置：连不上时（例如「设备不支持」）用户照样要能看诊断、导日志
+ui.settingsOpenHome.addEventListener("click", openSettings);
 ui.settingsClose.addEventListener("click", closeSettings);
 
 applyLabels();
