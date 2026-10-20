@@ -4,7 +4,7 @@ import test from "node:test";
 
 globalThis.window = globalThis;
 
-const { missingCapabilities } = await import("../web/brands.js");
+const { missingCapabilities, platformInfo } = await import("../web/brands.js");
 const { linkOf } = await import("../web/link.js");
 
 function setNavigator(value) {
@@ -66,4 +66,38 @@ test("服务/写入的原生错误码映射不能变", () => {
   assert.equal(linkOf(new Error("spp")), "failed");
   // 带细节的错误码不在映射表里，必须退回 failed 而不是改写法
   assert.equal(linkOf(new Error("service status=133")), "failed");
+});
+
+test("Android 上 platform() 不给能力时，按桥方法兜底（真机事故回归）", () => {
+  const list = withGlobals(() => {
+    globalThis.NativeBLE = {
+      env: () => JSON.stringify({ adapter: "on" }),
+      listDevices: () => {},
+      bleConnect: () => {},
+      bleScan: () => {},
+      sendData: () => {},
+      bleDisconnect: () => {},
+    };
+  }, () => {
+    const caps = platformInfo();
+    return { caps, missing: missingCapabilities() };
+  });
+  assert.equal(list.caps.hub, true, "有 listDevices 就必须认为有设备中心");
+  assert.deepEqual(list.caps.transports, ["ble", "spp"]);
+  assert.deepEqual(list.missing, [], `不该报缺口：${list.missing.join(" / ")}`);
+});
+
+test("platform() 抛错时也不能丢掉设备中心", () => {
+  const caps = withGlobals(() => {
+    globalThis.NativeBLE = {
+      platform: () => {
+        throw new Error("Java exception was raised");
+      },
+      listDevices: () => {},
+      bleConnect: () => {},
+      sendData: () => {},
+    };
+  }, platformInfo);
+  assert.equal(caps.hub, true);
+  assert.ok(caps.transports.includes("ble"));
 });
