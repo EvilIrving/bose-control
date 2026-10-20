@@ -385,8 +385,15 @@ class BmapBridge(
         }
 
         if (wantAddress != null) {
-            log("known target, open control channel directly")
-            trySpp(ad, mine)
+            // 页面明确要了 transport（这里是 ble）且有地址：直接连这台设备的 GATT。
+            // 以前这里无条件改道 SPP，结果连到的是别的 RFCOMM 通道，回来的不是 BMAP，
+            // 每条请求都超时，界面报「设备不支持」。
+            log("known target, open gatt directly address=$wantAddress")
+            runCatching { connectGatt(ad.getRemoteDevice(wantAddress), mine) }
+                .onFailure {
+                    log("getRemoteDevice/connectGatt 失败 ${it.message}，按 GATT 失败处理")
+                    fallback(mine)
+                }
             return
         }
         val scanner = ad.bluetoothLeScanner ?: return fail("off")
@@ -624,8 +631,9 @@ class BmapBridge(
         if (!sppTried && ad != null && ad.bondedDevices?.any {
             if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "")
         } == true) {
-            log("gatt unusable, fall back to rfcomm")
-            trySpp(ad, mine)
+            log("gatt unusable, fall back to rfcomm address=${wantAddress ?: "-"} services=${wantServices.size} channels=$wantChannels")
+            val target = wantAddress
+            if (target != null) openSpp(ad, target, mine) else trySpp(ad, mine)
         } else {
             fail("connect")
         }

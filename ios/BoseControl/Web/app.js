@@ -631,6 +631,11 @@ async function connect(peer = null) {
     });
     if (link !== current || !current.active) return;
     log(`connect channel ${elapsed()}ms`);
+    if (current.link !== brand.transport) {
+      logLine("conn", `transport-switched requested=${brand.transport} actual=${current.link}`, {
+        stage: "D", event: "transport-switched", level: "warn", attemptId: peer?.address ?? null,
+      });
+    }
     const scope = current.scope();
     const refresh = () => {
       if (link !== current || !scope.active) return;
