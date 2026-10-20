@@ -1,6 +1,6 @@
 import { ancModeName, eqPresetName, swipeActionName, t, tapActionName, voiceLocaleName } from "./labels.js";
 import { EMPTY, bytes, createParser, decode, encode, keyOf, num, text } from "./spp.js";
-import { chip, chips, fillRows, pane } from "./ui.js";
+import { chip, chips, pane } from "./ui.js";
 
 // 华为耳机的控制命令，取值来自 OpenFreebuds 的 SPP 命令表，
 // 每条都在 FreeClip 2 上实际跑通过（见 tests/spp.test.mjs 里的真机回包）。
@@ -618,7 +618,6 @@ export class HuaweiHeadset {
     this.renderVoice();
     this.renderQuality();
     this.renderDevices();
-    this.renderDiag();
   }
 
   renderGestures() {
@@ -764,18 +763,6 @@ export class HuaweiHeadset {
     refresh.addEventListener("click", () => this.refreshPeers());
     actions.appendChild(refresh);
     ui.devices.appendChild(actions);
-  }
-
-  renderDiag() {
-    const ui = this.ui;
-    const rows = [
-      [t("bridge"), this.link.nativeOn ? "OK" : "—"],
-      [t("dualConnect"), this.dual ? t(this.dual.enabled ? "stateOn" : "stateOff") : "—"],
-      [t("peers"), String(this.dual?.devices.length ?? 0)],
-    ];
-    if (this.inEar != null) rows.push([t("inEar"), t(this.inEar ? "stateOn" : "stateOff")]);
-    rows.push([t("lastError"), this.link.lastError || "—"]);
-    fillRows(ui.diag, rows);
   }
 }
 

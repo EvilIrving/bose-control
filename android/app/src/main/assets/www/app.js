@@ -67,7 +67,7 @@ import {
 import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
 import { logCount, logLine, logSnapshot } from "./log.js";
-import { btStateKey, exportResult, locationKey } from "./diag.js";
+import { exportResult } from "./diag.js";
 import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
@@ -93,7 +93,6 @@ const ui = {
   settings: $("settings"),
   settingsOpen: $("settings-open"),
   settingsClose: $("settings-close"),
-  diag: $("diag"),
   diagActions: $("diag-actions"),
   toggles: $("toggles"),
   standby: $("standby"),
@@ -175,7 +174,7 @@ function exportText(result) {
     t(key)
       .replace("{path}", result.path || "?")
       .replace("{bytes}", String(result.bytes ?? 0))
-      .replace("{error}", result.error || t("btUnknown"));
+      .replace("{error}", result.error || t("unknown"));
   if (result.state === "saved") return fill("exportSaved");
   if (result.state === "savedButShareFailed") return fill("exportShareFailed");
   if (result.state === "canceled") return fill("exportCanceled");
@@ -304,19 +303,6 @@ function nativeEnv() {
 }
 
 function renderDiag() {
-  const chrome = (String(navigator.userAgent).match(/Chrome\/(\d+)/) || [])[1] || "?";
-  const env = nativeEnv();
-  const btKey = btStateKey(env);
-  const bt = btKey ? t(btKey) : "—";
-  const rows = [
-    ["WebView", `Chromium ${chrome}`],
-    [t("bridge"), hasNative() ? "OK" : "—"],
-    [t("btState"), bt],
-  ];
-  if (env) rows.push([t("location"), t(locationKey(env))]);
-  rows.push([t("lastError"), link.lastError || "—"]);
-  if (env && env.bonded >= 0) rows.push([t("devices"), String(env.bonded)]);
-  fillRows(ui.diag, rows);
   ui.diagActions.replaceChildren();
   if (canExportDiag()) {
     const btn = chip(t("exportDiag"), false);

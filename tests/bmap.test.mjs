@@ -328,7 +328,7 @@ test("web files are a complete page", () => {
   assert.match(html, /id="hint"/);
   assert.match(html, /id="device-trigger"/);
   assert.match(html, /id="device-menu"/);
-  assert.match(html, /id="diag"/);
+  assert.match(html, /id="diag-actions"/);
   assert.match(html, /"noModule" in HTMLScriptElement\.prototype/);
   assert.ok(html.indexOf('id="info"') > html.indexOf('id="settings"'), "设备信息卡在设置页");
   assert.ok(html.indexOf('id="device-menu"') < html.indexOf('<main'), "设备下拉在顶栏里");

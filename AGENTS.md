@@ -15,7 +15,7 @@ Bose Connector：不登录、不联网，用蓝牙直连耳机的一个页面 + 
 
 已验证真机：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号靠「谁回包就显示谁」自动适配。
 
-`npm test` 现在 102 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
+`npm test` 现在 100 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
 
 ## 我对 agent 的要求
 
@@ -97,7 +97,7 @@ sh scripts/sync-web.sh
 
 ### 9. 日志与诊断导出
 
-**不往界面上堆日志行。** 设置页「诊断」只放状态摘要 + 一个「导出诊断」按钮；排查问题靠导出的那份文本，不靠截图。
+**不往界面上堆日志行。** 设置页「诊断」只有一个「导出诊断」按钮（按钮旁边显示导出回执），不摆状态行；排查问题靠导出的那份文本，不靠截图。
 
 - **默认落盘，不靠用户导出**：三端原生各有一份 `Diag` 是唯一落盘 owner，启动最早处 `start()`
   （macOS / iOS 在 `App.init`，Android 在 `onCreate`）。Android 写 `filesDir/diagnostics/logs`，
