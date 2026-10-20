@@ -65,11 +65,6 @@ export const LABELS = {
   headset: { zh: "耳机操作", en: "Headset Actions" },
 
   diag: { zh: "诊断", en: "Diagnostics" },
-  unverified: { zh: "未验证的品牌", en: "Unverified brands" },
-  unverifiedHint: {
-    zh: "vivo / OPPO 的命令表来自逆向记录，没在真机上验证过，默认关闭。打开后它们才会出现在品牌列表和设备中心里。",
-    en: "vivo / OPPO support is ported from reverse-engineered notes and has never run on real hardware. It stays off until you turn it on here.",
-  },
   bridge: { zh: "原生桥", en: "Native bridge" },
   btState: { zh: "蓝牙", en: "Bluetooth" },
   btOn: { zh: "已开启", en: "On" },

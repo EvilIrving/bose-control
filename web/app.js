@@ -44,10 +44,9 @@ import {
 } from "./bmap.js";
 import { HeadsetLink, isCancelled } from "./transport.js";
 import { createBoseCodec } from "./bose.js";
-import { brandById, brandEnabled, brandForName, brandList, bridgeAvailable, brandsHere, missingCapabilities, nativeHub, platformInfo, setBridgeAvailable, transportFor } from "./brands.js";
+import { brandById, brandForName, bridgeAvailable, brandsHere, missingCapabilities, nativeHub, platformInfo, setBridgeAvailable } from "./brands.js";
 import { LocalBridge } from "./bridge.js";
 import { getBrand, setBrand } from "./brand.js";
-import { setUnverified, unverifiedOn } from "./experimental.js";
 import { chip, chips, fillRows, pane } from "./ui.js";
 import { batteryText, linkOf, linkText } from "./link.js";
 import { productName } from "./products.js";
@@ -96,7 +95,6 @@ const ui = {
   settingsClose: $("settings-close"),
   diag: $("diag"),
   diagActions: $("diag-actions"),
-  unverified: $("unverified"),
   toggles: $("toggles"),
   standby: $("standby"),
   transport: $("transport"),
@@ -291,25 +289,7 @@ function exportDiag() {
 function renderSettings() {
   renderLanguage();
   session?.renderSettings?.();
-  renderUnverified();
   renderDiag();
-}
-
-// 未验证的品牌默认不出现在任何地方，这个开关是唯一入口
-function renderUnverified() {
-  chips(
-    ui.unverified,
-    [
-      { key: "off", label: t("stateOff") },
-      { key: "on", label: t("stateOn") },
-    ],
-    unverifiedOn() ? "on" : "off",
-    (id) => {
-      setUnverified(id === "on");
-      renderUnverified();
-      renderAll();
-    },
-  );
 }
 
 function nativeEnv() {
@@ -542,9 +522,7 @@ let peerDiag = { total: 0, matched: 0, dropped: [] };
 function exclusionReason(name) {
   const n = String(name || "").trim();
   if (!n) return "no-name";
-  const any = brandList().find((brand) => brand.matches(n));
-  if (!any) return "no-match";
-  return brandEnabled(any) ? "unexpected" : "brand-disabled";
+  return "no-match";
 }
 
 window.onDeviceList = (json) => {
@@ -565,7 +543,7 @@ window.onDeviceList = (json) => {
     detail: rows.map((p) => `${p.name || "(无名)"}@${p.address || "-"}=${brandForName(p.name)?.id ?? "no-match"}`).join(" | ")
       + ` 用时=${Math.round(performance.now() - startedAt)}ms`,
   });
-  // 逐台写排除原因：以后少一台，直接看是没名字、没匹配还是品牌被关掉
+  // 逐台写排除原因：以后少一台，直接看是没名字还是没匹配上
   for (const row of rows) {
     if (brandForName(row.name)) continue;
     const reason = exclusionReason(row.name);
@@ -642,7 +620,7 @@ async function connect(peer = null) {
   const current = new HeadsetLink(brand.codec());
   link = current;
   const started = performance.now();
-  logLine("conn", `attempt-start brand=${brand.id} transport=${transportFor(brand)} address=${peer?.address ?? "-"} services=${(brand.services ?? []).length} channels=${(brand.channels ?? []).join(",")}`,
+  logLine("conn", `attempt-start brand=${brand.id} transport=${brand.transport} address=${peer?.address ?? "-"} services=${(brand.services ?? []).length} channels=${(brand.channels ?? []).join(",")}`,
     { stage: "D", event: "attempt-start", attemptId: peer?.address ?? null });
   const elapsed = () => Math.round(performance.now() - started);
   current.onDisconnected = () => {
@@ -659,7 +637,7 @@ async function connect(peer = null) {
     await current.connect({
       acceptAll: false,
       address: peer?.address,
-      transport: transportFor(brand),
+      transport: brand.transport,
       channels: brand.channels ?? [],
       services: brand.services ?? [],
     });

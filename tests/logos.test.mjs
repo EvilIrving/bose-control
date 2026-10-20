@@ -1,13 +1,13 @@
-// 品牌词标：设备中心卡片第二行用它替代品牌文字，四个品牌一个都不能少。
+// 品牌词标：设备中心卡片第二行用它替代品牌文字，两个品牌一个都不能少。
 // 顺便钉住两条底线：颜色一律走 currentColor（深色底上随文字渲染）、
 // 图形只做装饰（语义在宿主的 aria-label 里）。
 import assert from "node:assert/strict";
 import test from "node:test";
 import { brandLogoSvg } from "../web/logos.js";
 
-const BRANDS = ["bose", "huawei", "vivo", "oppo"];
+const BRANDS = ["bose", "huawei"];
 
-test("四个品牌的词标都拿得到，而且带 viewBox", () => {
+test("两个品牌的词标都拿得到，而且带 viewBox", () => {
   for (const id of BRANDS) {
     const svg = brandLogoSvg(id);
     assert.ok(svg, `${id} 的词标没了`);

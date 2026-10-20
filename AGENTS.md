@@ -6,16 +6,16 @@ Bose Connector：不登录、不联网，用蓝牙直连耳机的一个页面 + 
 
 ## 项目现状
 
-| 平台 | 页面 | 设备中心 | Bose | 华为 SPP | vivo / OPPO |
-| --- | --- | --- | --- | --- | --- |
-| macOS | WKWebView + 内置 `Web/` | 有 | BLE + RFCOMM | 有（真机验过 FreeClip 2） | 默认关闭 |
-| Android | WebView + `assets/www/` | 有 | BLE + RFCOMM | 有（未真机验证） | 默认关闭 |
-| iOS | WKWebView + 内置 `Web/` | 无 | BLE | 永远没有（系统不给第三方 SPP） | 没有 |
-| Chrome / Edge | 直接开页面 | 无 | Web Bluetooth | 仅当页面由 `server.py` 提供 | 默认关闭 |
+| 平台 | 页面 | 设备中心 | Bose | 华为 SPP |
+| --- | --- | --- | --- | --- |
+| macOS | WKWebView + 内置 `Web/` | 有 | BLE + RFCOMM | 有（真机验过 FreeClip 2） |
+| Android | WebView + `assets/www/` | 有 | BLE + RFCOMM | 有（未真机验证） |
+| iOS | WKWebView + 内置 `Web/` | 无 | BLE | 永远没有（系统不给第三方 SPP） |
+| Chrome / Edge | 直接开页面 | 无 | Web Bluetooth | 仅当页面由 `server.py` 提供 |
 
 已验证真机：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号靠「谁回包就显示谁」自动适配。
 
-`npm test` 现在 113 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
+`npm test` 现在 102 条全过。测试都在 `tests/*.test.mjs`，直接 import `web/` 里的模块。
 
 ## 我对 agent 的要求
 
@@ -53,7 +53,7 @@ sh scripts/sync-web.sh
 
 ### 3. 只放品牌词标，别的不放
 
-设备中心卡片第二行放厂商词标（`web/logos.js`：Bose / HUAWEI / vivo / OPPO），替掉原来的品牌文字；文字版品牌只留在 `title` / `aria-label`，跟状态点一个规矩。耳机示意图不放，`web/art.js` 不要加回来。
+设备中心卡片第二行放厂商词标（`web/logos.js`：Bose / HUAWEI），替掉原来的品牌文字；文字版品牌只留在 `title` / `aria-label`，跟状态点一个规矩。耳机示意图不放，`web/art.js` 不要加回来。
 
 - 词标一律用官方公开渠道的真素材（出处见 README「品牌标识」），原样内联、不改形，只把填充换成 `currentColor` 随旁边文字渲染；商标归各家所有。
 - 新品牌先拿到官方可再分发的矢量文件再加词标；找不到就先不摆。自己画、自己拼、拿官方渲染图都不行。
@@ -66,19 +66,13 @@ sh scripts/sync-web.sh
 
 连上了但一条控制回包都没有 → 断开并提示「设备不支持」，不要留一个空白控制页。
 
-### 5. 未验证的品牌默认关闭
-
-vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimental.js` 把它们挡在默认之外。开关在设置页「未验证的品牌」，或 `?unverified=1`。
-
-新增没真机验证的品牌，照这个规则办：能读能写也不默认放出来。
-
-### 6. 只有一套外观
+### 5. 只有一套外观
 
 `web/styles.css` 是唯一主题：黑底、胶囊 chip、白底滑轨、无边框顶栏。没有 `data-theme`、没有 `theme.css`、设置页没有「外观」。
 
 不要再加主题切换，也不要「顺手对齐 shadcn」把这套改掉。用户明确说过 shadcn 那版不如这套好看。
 
-### 7. 布局规则
+### 6. 布局规则
 
 - chip 左对齐，有几个排几个；**7 个以内不许换行**（`#modes.dense`），挤不下就缩字号，不要固定行宽、不要溢出换行。
 - 新建模式只在模式行末尾放一个「＋」，不写「新建」两个字。
@@ -91,17 +85,17 @@ vivo / OPPO 的命令表来自第三方逆向、没真机验证，`web/experimen
 - 不给控件加 `cursor: pointer` 之类的光标手势（`styles.css` 里全局是 `cursor: default`）。
 - 触控目标不小于约 44px，但视觉上压扁、按钮圆角不要过大。
 
-### 8. 「连上了」的判定
+### 7. 「连上了」的判定
 
 `link.connected` 只说明通道开着。会话还活着要同时满足「通道开着 + 这次连接真的读到过有效数据」（`web/app.js` 的 `sessionLive()` / `state.link === "ready"`）。可用控制通过品牌 `ready()` 提前确认，不把任意通知或错误包当成 ready。
 
 系统蓝牙链路在 App 关掉控制通道后还会挂一阵，拿它写「已连接」会骗人：卡片显示已连接，点进去要重连。改动这块要同时看设备中心卡片、顶栏下拉、点卡片的行为三处。
 
-### 9. 原生端不认识任何品牌
+### 8. 原生端不认识任何品牌
 
 原生层只做四件事：枚举系统配对设备、按页面给的 `transport` / `address` / `channels` / `services` 建通道、收发字节、上报错误码。加品牌不改原生代码。
 
-### 10. 日志与诊断导出
+### 9. 日志与诊断导出
 
 **不往界面上堆日志行。** 设置页「诊断」只放状态摘要 + 一个「导出诊断」按钮；排查问题靠导出的那份文本，不靠截图。
 
@@ -134,16 +128,16 @@ web/ 页面（无构建、ES module）
  ├─ transport.js  字节进出 + 请求配对（不认识品牌）
  ├─ brand.js      当前品牌（运行时状态）
  ├─ brands.js     品牌注册表 + 平台能力判定
- ├─ bose.js / huawei.js / vivo.js / oppo.js   品牌描述符 + codec + session
- ├─ bmap.js / spp.js / gaia.js / opo.js       纯协议编解码
+ ├─ bose.js / huawei.js                   品牌描述符 + codec + session
+ ├─ bmap.js / spp.js                      纯协议编解码
  ├─ bridge.js     浏览器 → server.py 的 WebSocket 串口桥
  ├─ native.js     原生桥调用（NativeBLE / messageHandlers）
  ├─ labels.js     中英文案（唯一来源）
  ├─ menu.js       下拉（键盘 / 点外关闭）
- ├─ logos.js      厂商词标（Bose / HUAWEI / vivo / OPPO，来源见 README）
+ ├─ logos.js      厂商词标（Bose / HUAWEI，来源见 README）
  ├─ ui.js         chip / 行 / 面板小工具
  ├─ link.js       错误码 → 提示
- ├─ products.js   型号表           experimental.js  未验证品牌开关
+ ├─ products.js   型号表
  └─ index.html / styles.css
 
 原生：macOS (BLE + RFCOMM)、Android (BLE + RFCOMM)、iOS (BLE)、tools/bt-bridge + server.py (浏览器 SPP)
@@ -154,13 +148,12 @@ web/ 页面（无构建、ES module）
 新增品牌：新建 `web/<brand>.js`，导出描述符，在 `web/brands.js` 的 `registry` 加一行。
 
 ```js
-{ id, label, transport: "ble" | "spp", alt?, channels?, services?,
+{ id, label, transport: "ble" | "spp", channels?, services?,
   matches(name), codec(), create({ link, ui, state, refresh, log }) }
 ```
 
 - `codec()` 返回 `{ id, ble, filters, services, chars, reset(), chunks(bytes, link), parse(chunk, link), key(packet), header(bytes) }`。
 - `create()` 返回 `load()` / `render()` / `renderSettings()` / `onPacket(packet)`，可选 `ready()` 表示已有可用控制。宿主在 `refresh()` 时检查 ready，不必等 load 全部结束；load 仍返回「有没有读到东西」。每次连接独立 state，品牌拿到绑定该连接的 `link.scope()`，旧任务不得复用新连接。
-- `alt` 是备用通道，只在主通道这台机器上没有时才算可用（vivo 的 GATT 只在浏览器里能走）。
 
 ### 传输层
 
@@ -185,7 +178,7 @@ web/ 页面（无构建、ES module）
 
 ### 存储键
 
-页面：`bose.lang`、`headset.brand`、`headset.unverified`。macOS 的品牌另存 `UserDefaults`（自定义 scheme 下 localStorage 只在本次会话有效），启动时以 `NativeBrand` 注入。
+页面：`bose.lang`、`headset.brand`。macOS 的品牌另存 `UserDefaults`（自定义 scheme 下 localStorage 只在本次会话有效），启动时以 `NativeBrand` 注入。
 
 ### 为什么不上 React / 构建链
 
@@ -216,12 +209,12 @@ web/ 页面（无构建、ES module）
 
 - 设备中心来自 `IOBluetoothDevice.pairedDevices()`，排序和去重都在 `HeadsetCatalog`（已连接优先 + 本地化自然序）。
 - Bose：明确点选已配对设备时先试 RFCOMM，失败再试目标 BLE；没有目标时先 BLE。BLE 名称匹配允许 LE- 前缀差异，不能回退任意其它 Bose。串口只尝试控制服务和明确候选端口，不遍历全部 SDP 端口。
-- 华为 / vivo / OPPO：端口按 `services` 的 UUID 从 SDP 取，取不到再试 `channels`。不要碰免提 / A2DP 的 RFCOMM 口，写进去会打断通话。
+- 华为：端口按 `services` 的 UUID 从 SDP 取，取不到再试 `channels`。不要碰免提 / A2DP 的 RFCOMM 口，写进去会打断通话。
 - 页面统一用 `bleConnect(JSON)`；无参 `bleScan` 是旧桥入口，macOS 点设备中心会连错设备。
 
 ### 浏览器 / `server.py`
 
-- Web Bluetooth 只给 GATT，给不了 SPP。华为、OPPO 只有在页面由 `server.py` 提供时才能控（`tools/bt-bridge` 子进程代开 RFCOMM，WebSocket `/bt`）。
+- Web Bluetooth 只给 GATT，给不了 SPP。华为只有在页面由 `server.py` 提供时才能控（`tools/bt-bridge` 子进程代开 RFCOMM，WebSocket `/bt`）。
 - `server.py` 自签 HTTPS（`.certs/`，已忽略），因为 Web Bluetooth 要求安全上下文。`/api/devices` 能通就说明桥在。
 
 ## 协议层：写操作要当心
@@ -241,12 +234,6 @@ web/ 页面（无构建、ES module）
 - `2b2e` 双连接总开关：写 0/1 都回成功但读回一直是 1，耳机不接受，只显示状态。
 - 有些块**故意不做**：消噪（FreeClip 2 是开放式，参考实现也排除）、改名 / 关机 / 播放控制（SPP 里没找到命令）。
 - 「音质优先 / 连接优先」只是编码偏好，不碰音量；这副耳机在 macOS 上不支持绝对音量，系统音量条是软件衰减。
-
-### vivo / OPPO
-
-- 默认关闭，没真机验证。代码按公开逆向记录实现，字节级有单测。
-- OPPO 的长度字段是 **LEB128 变长整数**，按单字节读会在长 payload 上安静地错帧。
-- vivo 降噪设置的尾巴（`reduceModel`）按型号代际不同，代码按 `[03]` → `[03 01]` → `[04 00]` 试，通了就记住。
 
 ### 真机写测试的红线
 

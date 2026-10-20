@@ -77,7 +77,7 @@ final class Opener: NSObject, IOBluetoothRFCOMMChannelDelegate {
         next(device)
     }
 
-    // 私有控制服务（vivo 0x0837、OPPO 0x079A）的端口号只能从 SDP 里读，不能猜
+    // 品牌私有的控制服务，端口号只能从 SDP 里读，不能猜
     private func serviceChannels(_ device: IOBluetoothDevice) -> [BluetoothRFCOMMChannelID] {
         var ids: [BluetoothRFCOMMChannelID] = []
         for text in services {

@@ -2,17 +2,16 @@
 
 [![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml)
 
-不登录、不联网，用蓝牙直接控制 Bose、华为、vivo / iQOO 和 OPPO / 一加 / realme 耳机。
+不登录、不联网，用蓝牙直接控制 Bose 和华为耳机。
 
-官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，Bose 走私有的 BMAP 协议，华为走蓝牙串口（SPP），vivo / iQOO 走 GAIA 帧，OPPO / 一加 / realme 走 HeyMelody 的 OPO 协议，数据不出本机。
+官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，Bose 走私有的 BMAP 协议，华为走蓝牙串口（SPP），数据不出本机。
 
-- **网页版**：Chrome / Edge 的 Web Bluetooth，打开就能连（Bose，以及开启开关后的 vivo GATT）
+- **网页版**：Chrome / Edge 的 Web Bluetooth，打开就能连 Bose
 - **App**：macOS（BLE + RFCOMM）、Android（BLE + RFCOMM）、iOS（BLE）
 - **设备中心**：macOS、Android 上首页就是设备中心，系统里配对过的耳机都列出来，点哪台控哪台（页面由 `server.py` 提供时，浏览器里也有）
 - **按能力渲染**：耳机不回的功能整块隐藏，不会留一个空面板
-- **默认关闭**：vivo / OPPO 的命令表来自逆向记录、没在真机上验证过，默认不出现；要试在设置页「未验证的品牌」里自己打开
 
-Controls Bose headphones over BMAP, HUAWEI earbuds over SPP, vivo / iQOO over GAIA and OPPO / OnePlus / realme over the HeyMelody OPO protocol, from the browser or a native app. No account, no cloud, no telemetry.
+Controls Bose headphones over BMAP and HUAWEI earbuds over SPP, from the browser or a native app. No account, no cloud, no telemetry.
 
 改 `web/` 之后跑 `scripts/sync-web.sh` 再编 App（Android / iOS / macOS 三端共用同一份页面）。
 
@@ -26,7 +25,7 @@ Controls Bose headphones over BMAP, HUAWEI earbuds over SPP, vivo / iQOO over GA
 | 设备页 | 顶栏是可点的「名字」下拉，点开就列设备中心里的耳机，正在连的那台打勾，选别的直接换过去；名字右边是一小串电量，再往下是各功能面板 | 点方块进；右上角小箭头返回，或按 `Esc` |
 | 设置页 | 语言，各品牌自己的配置项，已配对设备，设备信息（产品名称 / 产品变型 / 固件版本 / 序列号 / 双耳序列号 / 蓝牙 MAC / 硬件版本），耳机操作，诊断 | 设备页底部「设置」进，右上角「完成」出 |
 
-- 设备中心的方块上摆厂商词标（Bose / HUAWEI / vivo / OPPO），替掉原来的品牌文字；来源和商标归属见「品牌标识」。耳机示意图不放。
+- 设备中心的方块上摆厂商词标（Bose / HUAWEI），替掉原来的品牌文字；来源和商标归属见「品牌标识」。耳机示意图不放。
 - 电量按耳机报的组件写，读不到就不写（不拿 0% 凑数）：三段是 `左 96% · 右 100% · 盒 59%`（英文环境是 `L / R / Case`），只有一条读数就只写 `60%`。设备页写在名字右边，设备中心的方块上写在底下。
 - 返回**不断开**：回到设备中心时那台设备仍连着、方块高亮，再点它就是回到控制页，不会重连。
 - 词标后面的状态点：绿 = 连着（App 会话开着，或者系统链路还在），灰 = 没连。文字版「已连接 / 未连接」只留在 `title` / `aria-label` 里给读屏。
@@ -38,14 +37,12 @@ Controls Bose headphones over BMAP, HUAWEI earbuds over SPP, vivo / iQOO over GA
 
 ## 品牌标识
 
-设备中心卡片上的厂商词标原样内联在 `web/logos.js`，没有改形，只把填充统一换成 `currentColor`，深色底上随旁边文字渲染。Bose / HUAWEI / vivo / OPPO 是各家的商标，这里只用于识别设备品牌。
+设备中心卡片上的厂商词标原样内联在 `web/logos.js`，没有改形，只把填充统一换成 `currentColor`，深色底上随旁边文字渲染。Bose / HUAWEI 是各家的商标，这里只用于识别设备品牌。
 
 | 品牌 | 来源 | 许可标注 |
 | --- | --- | --- |
 | Bose | bose.com 页头静态资源 `logo.svg`；[Commons 同形文件《Bose logo.svg》](https://commons.wikimedia.org/wiki/File:Bose_logo.svg) | Public domain |
 | HUAWEI | Commons [《Huawei wordmark 2019.svg》](https://commons.wikimedia.org/wiki/File:Huawei_wordmark_2019.svg) | Public domain |
-| vivo | Commons [《Vivo (China) logo.svg》](https://commons.wikimedia.org/wiki/File:Vivo_%28China%29_logo.svg) | Public domain |
-| OPPO | Commons [《OPPO LOGO 2019.svg》](https://commons.wikimedia.org/wiki/File:OPPO_LOGO_2019.svg) | Public domain |
 
 ## 电脑 Chrome
 
@@ -114,7 +111,6 @@ xcodebuild -project macos/BoseControl.xcodeproj -scheme BoseControl -configurati
 
 - **Bose**：点选设备后先找该地址已有的 GATT 连接，否则直接尝试该设备的 RFCOMM（`00000000-deca-fade-deca-deafdecacaff`），失败再试目标 GATT。只有未指定设备时才先扫描。BLE 地址与经典蓝牙地址不同的机型仍需真机验证。
 - **华为**：页面带上设备地址，先按标准 SPP UUID 开，不通再按端口 1 / 2 / 3 试。这条通道还没在 Android 真机上跑过。
-- **vivo / OPPO**：同一套 SPP 路径，默认关闭（见「未验证的品牌」）。
 
 列表按「已连接优先 → 名字自然序」排好（数字按数值比，不分大小写），刷新前后顺序不变。
 
@@ -150,14 +146,12 @@ adb logcat -s BOSE
 
 ## 传输
 
-| | Bose（BLE GATT） | Bose（RFCOMM） | 华为（SPP） | vivo¹（SPP） | vivo¹（GATT） | OPPO¹（SPP） |
-| --- | --- | --- | --- | --- | --- | --- |
-| Chrome | 有 | 无 | 只有开了 `server.py` | 只有开了 `server.py` | 有 | 只有开了 `server.py` |
-| iOS App | 有 | 无（系统不给第三方） | 无（同上） | 无 | 还没接 | 无 |
-| macOS App | 有 | 有 | 有 | 有 | 还没接 | 有 |
-| Android App | 有 | 有 | 有（未真机验证） | 有（按 UUID 找端口） | 还没接 | 有（按 UUID 找端口） |
-
-¹ vivo / OPPO 默认关闭，先在设置页「未验证的品牌」里打开（或者地址后面加 `?unverified=1`）。表里的「有」指的是开关打开后的能力。
+| | Bose（BLE GATT） | Bose（RFCOMM） | 华为（SPP） |
+| --- | --- | --- | --- |
+| Chrome | 有 | 无 | 只有开了 `server.py` |
+| iOS App | 有 | 无（系统不给第三方） | 无（同上） |
+| macOS App | 有 | 有 | 有 |
+| Android App | 有 | 有 | 有（未真机验证） |
 
 ## Bose（BMAP）
 
@@ -260,99 +254,22 @@ macOS、Android 和由 `server.py` 提供的浏览器页面能连华为。设备
 - 浏览器直接开静态文件时，华为不在可选品牌里（Web Bluetooth 给不了 SPP）；改用 `server.py` 打开页面就有这条通道。
 - macOS 上没配对过会提示先配对；配对过但耳机在盒里、或刚被别的设备占着时，SPP 会话可能整个不响应，再点一次即可。
 
-## vivo / iQOO（GAIA）
-
-> **默认关闭**。这一节的命令表来自第三方逆向记录，本项目没有对应耳机、没在真机上验证过，所以默认既不出现在品牌列表里，也不会去识别这类名字。要试：设置页「未验证的品牌」打开，或在地址后面加 `?unverified=1`。
-
-vivo 和 iQOO 的 TWS 用的是 GAIA 帧，同一套命令跑在两条物理通道上，帧封装不一样：
-
-- **私有串口**（service `00000837-d102-11e1-9b23-00025b00a5a5`，官方 Android App 走这条）：`FF | ver | flags | len | vendor(2) | cmd(2) | payload`
-- **BLE GATT**（service `00001100-…`，写 `00001101-…`、通知 `00001102-…`，官方 iOS App 走这条）：裸 `vendor(2) cmd(2) payload`，没有帧头——GATT 自己给了消息边界
-
-| | 能不能用 |
-| --- | --- |
-| macOS App | 可以，私有串口 |
-| Android App | 可以，同一套命令，端口按服务 UUID 从 SDP 里取 |
-| Chrome / Edge | 两种：页面由 `server.py` 提供时走本机串口桥；直接开静态页时走 Web Bluetooth 的 GATT 通道 |
-| iOS App | 不行：原生 BLE 通道目前只为 Bose 的 FEBE 写死，vivo 的 GATT 只在浏览器里通 |
-
-浏览器里走 GATT 时按设备名前缀（`vivo` / `iQOO`）找耳机，系统里改过名的耳机在浏览器里选不到；这种情况用 App，或者把名字改回去。
-
-| 主页 | 设置页 |
-| --- | --- |
-| 降噪三档（降噪 / 关闭 / 通透） | 查找耳机 |
-| 均衡预设 | 手势：双击（左右耳分开）、长按循环集合 |
-| | 多连接：已连设备列表、切换 / 断开 / 移除 |
-| | 设备信息（型号、固件、序列号、MAC） |
-| | 诊断（走的哪条通道、佩戴状态、设备数） |
-
-### 协议与可信度
-
-命令号、payload 布局、版本分层来自 [TWS-Pods-PC](https://github.com/Zhaoyi-ya/TWS-Pods-PC)（上游是 HyperEars）在 **vivo TWS 3e** 上的抓包；「GATT 侧是裸 content」这条来自 [vivopods-mac](https://github.com/FxRayHughes/vivopods-mac) 在 **vivo TWS 5** 上的真机记录。
-
-**本项目没有这几台耳机**，代码是按上面的记录实现的，字节级有单测（`tests/gaia.test.mjs`、`tests/vivo.test.mjs`），但没在真机上跑过。已知不确定的地方：
-
-- **降噪设置的尾巴**（`reduceModel`）按型号代际不同：资料里只有 TWS 3e `[03]`、TWS 4 `[03 01]`、Air3 Pro `[04 00]` 三种。代码第一次设置时按 `[03]` → `[03 01]` → `[04 00]` 顺序试，哪条被确认就记住，之后固定用它；三条都不回就说明这台型号不在资料里。
-- **版本用错耳机会静默不回包**：握手、注册通知链、电量、时间应答是 v4，其余控制帧是 v3。代码按这个分层发，握手失败时再退一次 v3。
-- 空间音频、游戏低延迟在资料里只有反编译依据，没做。
-
-### 怎么验证
-
-有耳机的话，先在系统里配对，再从设备中心点它。看得到电量就说明链路和帧都对；降噪点不动多半是 `reduceModel` 尾巴不对，`console.debug` 里能看到每条命令有没有回包。
-
-## OPPO / OnePlus / realme（OPO）
-
-> **默认关闭**，原因同上：命令表来自逆向记录，没在真机上验证过。要试先到设置页「未验证的品牌」里打开。
-
-这三个牌子（含 HeyMelody 管的那一批，比如 Enco、OnePlus Buds、realme Buds）走的是同一条经典蓝牙控制通道，OPO 帧：
-
-- 控制服务：`0000079a-d102-11e1-9b23-00025b00a5a5`，部分型号另报 `00001107-d102-11e1-9b23-00025b00a5a5`
-- 帧：`AA | 长度(LEB128) | 00 00 | 命令(1) | 类型(1) | 序号(1) | 参数长度(2 小端) | 参数`
-- 类型：`01` 请求、`81` 回包、`04` 设置、`84` 设置回执、`02` 主动上报
-
-**长度字段是变长整数，不是一个字节**：这条最容易被写错，单字节读法在 299 字节 payload 上会错帧，而且错得很安静。
-
-| | 能不能用 |
-| --- | --- |
-| macOS App | 可以，按服务 UUID 从 SDP 取端口 |
-| Android App | 可以，同一套 |
-| Chrome / Edge | 只有页面由 `server.py` 提供时（走本机串口桥） |
-| iOS App | 不行（SPP 不给第三方） |
-
-| 主页 | 设置页 |
-| --- | --- |
-| 降噪（关闭 / 降噪 / 通透 / 自适应） | 查找耳机 |
-| 均衡预设 | 手势：双击 / 三击 / 长按（左右耳分开） |
-| | 已连接设备 |
-| | 设备信息 |
-
-### 协议与可信度
-
-帧格式、命令表、写操作来自 [OP-Buds-4-PC-Controls](https://github.com/Megalodon-sharky/OP-Buds-4-PC-Controls) 在 **OnePlus Buds 4** 上的逐字节实测（它的文档还纠正了两处公开实现的读法），写命令的 payload 形状另参考了 [OppoPodsWindows](https://github.com/3295074384/OppoPodsWindows)（HeyMelody RFCOMM）。
-
-**本项目没有这台耳机**，代码按上述记录实现，字节级有单测（`tests/opo.test.mjs`），没在真机上跑过。已知不确定的地方：
-
-- 上报有三族（`0x0204` 按 topic、`0x05xx` 按命令号、`0xF4` 是 JSON 埋点），代码只依赖前两族，第三族忽略。
-- 设置命令回 `00` **只代表参数被接受**，不代表真的生效：代码每次写完都回读一次确认。
-- 手势写之前会把整张表读回来、只改目标一个字节、其余原样回传。
-
 ## 加一个品牌
 
 宿主和原生端都不认品牌，加三星这类耳机时只动这两处：
 
-1. 新建 `web/<brand>.js`，导出 brand 描述符（现成例子：`web/vivo.js`、`web/oppo.js`）：
+1. 新建 `web/<brand>.js`，导出 brand 描述符（现成例子：`web/bose.js`、`web/huawei.js`）：
 
 ```js
-export const vivoBrand = {
-  id: "vivo",
-  label: "vivo / iQOO",
+export const huaweiBrand = {
+  id: "huawei",
+  label: "HUAWEI",
   transport: "spp",        // "ble" 走 GATT，"spp" 走蓝牙串口
-  alt: "ble",              // 主通道这台机器上没有时的备用通道（只在浏览器 Web Bluetooth 下算可用）
-  channels: [],            // 端口号可以从 SDP 里取时就不用写
-  services: ["00000837-d102-11e1-9b23-00025b00a5a5"],  // 私有控制服务的 UUID，原生端按它去 SDP 里找端口
-  matches: (name) => /vivo|iqoo/i.test(name),
-  codec: createVivoCodec,  // { reset, chunks, parse, key, header }，帧格式自己定
-  create: (ctx) => new VivoSession(ctx),
+  channels: [1, 2, 3],     // 端口号候选，从 SDP 里取不到时按顺序试
+  services: [],            // 可选：私有控制服务的 UUID，原生端按它去 SDP 里找端口
+  matches: (name) => /huawei|freebuds/i.test(name),
+  codec: createHuaweiCodec,  // { reset, chunks, parse, key, header }，帧格式自己定
+  create: (ctx) => new HuaweiHeadset(ctx),
 };
 ```
 
@@ -382,7 +299,7 @@ Bose 和华为已确认可用的控制会先出现，其余能力继续读取，
 
 页面不按型号写死开关，谁回包就显示谁：每个功能都是连上后单独 GET 一次，有回复才渲染那一块，没回复整块隐藏（连标题一起）。所以同一份代码可以覆盖 QC Ultra、QC45、NC700、earbuds 等不同能力集。
 
-Bose 走 BMAP，华为走 SPP，vivo 走 GAIA（串口或 GATT），OPPO 走 OPO，四边共用同一套页面和「谁回包就显示谁」的规则。
+Bose 走 BMAP，华为走 SPP，两边共用同一套页面和「谁回包就显示谁」的规则。
 
 | 区块 | 出现的条件 |
 | --- | --- |
@@ -410,4 +327,4 @@ Bose 走 BMAP，华为走 SPP，vivo 走 GAIA（串口或 GATT），OPPO 走 OPO
 
 连不上时的提示都由 `web/link.js` 统一给出（原生端只上报错误码，不拼中文）：`请先连接耳机`、`需要先开启蓝牙`、`需要蓝牙权限`、`没找到耳机，再试一次`、`耳机被别的设备连着`、`设备不支持`、`请重新连接`。每条都在 10 字以内，保证窄屏单行不换行。
 
-已验证机型：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。vivo / iQOO 与 OPPO / 一加 / realme 按公开逆向记录实现，**尚未在真机上验证**（两份实现的可信度与风险点见上面各自小节）。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。
+已验证机型：Bose QuietComfort Ultra Headphones、HUAWEI FreeClip 2。其他型号按上面的机制自动适配，若某块显示不对，请附 `console.debug` 里的请求/回复记录提 issue。

@@ -675,12 +675,6 @@ section h2 {
 .peer-card .peer-brand[data-brand="huawei"] svg {
   height: 0.66rem;
 }
-.peer-card .peer-brand[data-brand="vivo"] svg {
-  height: 0.68rem;
-}
-.peer-card .peer-brand[data-brand="oppo"] svg {
-  height: 0.7rem;
-}
 
 /* 状态只用一个点：绿 = 连着，灰 = 没连 */
 .peer-card .dot {

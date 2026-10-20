@@ -173,7 +173,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
     // 先按 SDP 里报的名字找，找不到再按最常见的 1 / 2 / 3 试。
     // 不碰 SDP 里的其它 RFCOMM 口，那可能是免提通道，写进去会打断通话。
     // 端口候选由页面按品牌给，这里只负责按顺序试。
-    // 品牌私有控制服务（vivo 0x0837、OPPO 0x079A）只能按 UUID 从 SDP 里读端口，排在最前。
+    // 品牌私有的控制服务只能按 UUID 从 SDP 里读端口，排在最前。
     private func channelCandidates(_ device: IOBluetoothDevice) -> [BluetoothRFCOMMChannelID] {
         var ids: [BluetoothRFCOMMChannelID] = []
         for id in serviceChannels(device) where !ids.contains(id) {
