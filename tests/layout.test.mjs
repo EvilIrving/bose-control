@@ -22,7 +22,25 @@ test("chip 行放不下就横向滑，不换行", () => {
 });
 
 test("整份样式表里没有会换行的 flex 行", () => {
-  assert.ok(!/flex-wrap:\s*wrap/.test(css), "还有 flex 行在换行");
+  assert.ok(!/flex-(?:wrap|flow)\s*:[^;}]*\bwrap\b/.test(css), "还有 flex 行在换行（flex-wrap / flex-flow）");
+});
+
+// 按 `选择器 { 声明 }` 拆规则。@media 块里的内层规则一样能拆出来（选择器里不含花括号）。
+const rules = [...css.replace(/\/\*[\s\S]*?\*\//g, "").matchAll(/([^{}]+)\{([^{}]*)\}/g)]
+  .map(([, sel, body]) => ({ sel: sel.trim(), body }))
+  .filter(({ sel }) => !sel.startsWith("@"));
+
+// 只有基础规则能给 chip 行定布局。后面再来一条 `.chips { overflow-x: clip }`
+// 或 `.chips { flex-flow: row wrap }` 会被第一条断言当成已存在的基础规则放过去。
+test("给 chip 行定布局的只有基础那一条规则", () => {
+  const base = ".chips, .levels, .row";
+  const LAYOUT = /\b(display|overflow[\w-]*|flex-(?:wrap|flow|direction)|grid-template[\w-]*|grid-auto[\w-]*)\s*:/;
+  for (const { sel, body } of rules) {
+    const flat = sel.replace(/\s+/g, " ");
+    if (flat === base) continue;
+    const bare = flat.split(",").some((part) => /^\.(chips|levels|row)$/.test(part.trim()));
+    assert.ok(!(bare && LAYOUT.test(body)), `${flat} 又给 chip 行定了一次布局：${body.trim()}`);
+  }
 });
 
 test("模式行不再靠截断塞进一行", () => {

@@ -4,10 +4,9 @@
 //
 // 为什么不用 `chrome --headless --window-size=390,844`：macOS 上那个窗口会被夹到 500 宽，
 // 量出来是桌面分支的布局。这里走 CDP 的 Emulation.setDeviceMetricsOverride 拿真视口。
-import { writeFile } from "node:fs/promises";
-import { createServer } from "node:http";
 import { spawn } from "node:child_process";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { createServer } from "node:http";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -30,6 +29,8 @@ const FIXTURE = `<!DOCTYPE html>
 import * as L from "/labels.js";
 import { chips } from "/ui.js";
 const zh = L.getLang() === "zh";
+// 模式名是耳机报的运行时数据，没有枚举表可查；这里用一组代表性长度。
+// 其余行的选项集合全部来自 labels.js 的真实枚举。
 const modes = zh
   ? ["消噪", "通透", "沉浸式音频", "自定义模式一", "自定义模式二", "电影", "夜间", "通话"]
   : ["Quiet", "Aware", "Immersive Audio", "Custom Mode One", "Custom Mode Two", "Cinema", "Night", "Call"];
@@ -56,12 +57,14 @@ for (const [id, items, sel] of rows) {
   box.append(h, el);
   chips(el, items, sel < 0 ? null : sel, () => {});
 }
-// Bose 的快捷动作：#shortcut 只是容器，chip 行在里面（华为往里放手势组）
-// 真机 QC Ultra 2 只报 4 项（supported 1/14/16/19，当前值 19），另外量一遍报 8 项的情况
+// Bose 的快捷动作：#shortcut 只是容器，chip 行在里面（华为往里放手势组）。
+// shortcut-4 是 QC Ultra 2 真机帧（supported 1/14/16/19，当前值 19）；
+// shortcut-max 是 labels.js 里 ActionButtonMode 全表，耳机报得多就是这么多。
+const ACTION_IDS = [...Array.from({ length: 22 }, (_, i) => i), 27];
 const groups = document.createElement("div");
 groups.id = "shortcut";
 box.append(groups);
-for (const [id, codes] of [["shortcut-4", [1, 14, 16, 19]], ["shortcut-8", [-1, 0, 1, 2, 3, 10, 18, 19]]]) {
+for (const [id, codes] of [["shortcut-4", [1, 14, 16, 19]], ["shortcut-max", ACTION_IDS]]) {
   const row = document.createElement("div");
   row.className = "chips";
   row.id = id;
@@ -109,7 +112,7 @@ for (let i = 0; i < 60 && !page; i++) {
   }
   if (!page) await sleep(250);
 }
-if (!page) { console.error(await (await fetch(`http://127.0.0.1:${debugPort}/json/list`)).text()); throw new Error("Chrome 没起来"); }
+if (!page) throw new Error(`Chrome 没起来（看 ${debugPort} 端口是不是被别的实例占着）`);
 
 const ws = new WebSocket(page.webSocketDebuggerUrl);
 let seq = 0;
@@ -153,7 +156,7 @@ const shotDir = process.argv.includes("--shot")
   ? process.argv[process.argv.indexOf("--shot") + 1]
   : null;
 
-console.log("行".padEnd(12) + sizes.map((w) => `${w}px 溢出`.padEnd(12)).join("") );
+console.log("行".padEnd(14) + sizes.map((w) => `${w}px 溢出`.padEnd(12)).join("") );
 for (const lang of ["zh", "en"]) {
   const results = new Map();
   for (const width of sizes) {
@@ -169,7 +172,7 @@ for (const lang of ["zh", "en"]) {
   }
   console.log(`\n${lang === "zh" ? "中文" : "English"}`);
   for (const [id, byWidth] of results) {
-    console.log(id.padEnd(12) + sizes.map((w) => `${byWidth[w]}px`.padEnd(12)).join(""));
+    console.log(id.padEnd(14) + sizes.map((w) => `${byWidth[w]}px`.padEnd(12)).join(""));
   }
 }
 

@@ -30,6 +30,18 @@ export function reveal(root, el) {
   else if (item.right > box.right) root.scrollLeft += item.right - box.right;
 }
 
+// 选中值真的变了才 reveal。每次重画都 reveal，会把用户正滑着看别的选项的位置拽回当前值；
+// 而响应驱动的 refresh 在刚连上时会有好几次。首次渲染（previous === undefined）仍会 reveal，
+// 所以一进来就看得到当前值。
+const shownSelection = new WeakMap();
+
+export function revealSelection(root, selected) {
+  const previous = shownSelection.get(root);
+  shownSelection.set(root, selected);
+  if (previous === selected) return;
+  reveal(root, root.querySelector(".on"));
+}
+
 export function chips(root, items, selected, onPick) {
   const on = (key) => (Array.isArray(selected) ? selected.includes(key) : key === selected);
   refill(root, (box) => {
@@ -43,7 +55,7 @@ export function chips(root, items, selected, onPick) {
   });
   // 单选行里带 .on 的那颗就是「当前值」：滑出屏就等于看不见当前值（耳机按键也能改它）。
   // 多选行（机身模式循环）不抢滚动位置，否则点一颗就被拽回第一颗选中项
-  if (!Array.isArray(selected)) reveal(root, root.querySelector(".on"));
+  if (!Array.isArray(selected)) revealSelection(root, selected);
 }
 
 export function fillRows(root, rows) {

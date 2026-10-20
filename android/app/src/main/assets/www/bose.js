@@ -57,7 +57,7 @@ import {
   t,
   voiceLanguageName,
 } from "./labels.js";
-import { chip, chips, fillRows, pane, refill, reveal } from "./ui.js";
+import { chip, chips, fillRows, pane, refill, revealSelection } from "./ui.js";
 
 // Bose 的 BMAP 实现：读全量状态、写各项设置、把面板画出来。
 // 宿主只认下面这几个入口：load() / render() / renderSettings() / diagRows()。
@@ -110,12 +110,19 @@ async function ask(packet, label, timeoutMs) {
 }
 
 async function tryAsk(packet, label, timeoutMs) {
+  const started = Date.now();
+  // 请求是编码后的字节，用它解出来的头拿 key，日志里就能直接对上是哪条命令
+  const head = decodeAll(packet)[0];
+  const key = head ? keyOf(head) : "?";
   try {
     if (link.active === false) return null;
     const reply = await ask(packet, label, timeoutMs);
-    return link.active === false ? null : reply;
+    if (link.active === false) return null;
+    log(`cmd ${label} key=${key} ok elapsed=${Date.now() - started}ms`);
+    return reply;
   } catch (err) {
-    log(err.message);
+    // 失败也要落一条：能力矩阵靠「有没有回包」判断，不是靠猜
+    log(`cmd ${label} key=${key} fail=${err.message} elapsed=${Date.now() - started}ms`);
     return null;
   }
 }
@@ -181,7 +188,7 @@ function renderModes() {
     row.appendChild(btn);
   });
   // 机身按键也能切模式，切到的那颗可能在滑走的位置上
-  reveal(ui.modes, ui.modes.querySelector(".on"));
+  revealSelection(ui.modes, state.currentMode);
 }
 
 function cncMax() {
@@ -569,6 +576,14 @@ async function loadDevice() {
   ]);
 
   refresh();
+  log("mode-defs " + state.modesAll.map((m) =>
+    `${m.index}:${m.name || "-"}:cnc=${m.cnc ?? "-"}:auto=${m.auto ? 1 : 0}:spatial=${m.spatial ?? "-"}:wind=${m.wind ? 1 : 0}:anc=${m.anc === false ? 0 : 1}`,
+  ).join(" | "));
+  log(`caps modes=${state.modesAll.length} eq=${state.eq.length} cnc=${Boolean(state.cnc)} ` +
+    `spatial=${state.hasAudioSettings} sidetone=${state.sidetone != null} ` +
+    `multipoint=${state.multipoint != null} conversation=${state.conversation != null} ` +
+    `standby=${state.standby != null} voice=${state.voice != null} captouch=${state.captouch != null} ` +
+    `autoAnswer=${state.autoAnswer != null} autoPlay=${state.autoPlay != null} transport=${state.hasTransport}`);
   // 补读和设备详情都不在关键路径上，界面先交出去
   void settleRetries().then(loadDetail);
   // 连上了但一个 BMAP 回包都没有（比如连到别家耳机），宿主据此判定「设备不支持」

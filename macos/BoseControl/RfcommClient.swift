@@ -452,8 +452,11 @@ enum Diag {
         case .notDetermined: auth = "undetermined"
         @unknown default: auth = "unknown"
         }
+        let controller = IOBluetoothHostController.default()
+        let ctrlName = controller?.nameAsString() ?? "?"
+        let ctrlAddr = controller?.addressAsString() ?? "?"
         return "macOS \(os) / app \(version)(\(build)) / \(Host.current().localizedName ?? "-")" +
-            " / bluetooth power=\(power) auth=\(auth)"
+            " / controller=\(ctrlName)@\(ctrlAddr) / bluetooth power=\(power) auth=\(auth)"
     }
 
     /// 同步版本：导出时调用方在主线程等一小会儿，换来一致快照

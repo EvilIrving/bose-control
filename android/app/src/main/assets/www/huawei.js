@@ -1,6 +1,6 @@
 import { ancModeName, eqPresetName, swipeActionName, t, tapActionName, voiceLocaleName } from "./labels.js";
 import { EMPTY, bytes, createParser, decode, encode, keyOf, num, text } from "./spp.js";
-import { chip, chips, pane, refill, reveal } from "./ui.js";
+import { chip, chips, pane, refill } from "./ui.js";
 
 // 华为耳机的控制命令，取值来自 OpenFreebuds 的 SPP 命令表，
 // 每条都在 FreeClip 2 上实际跑通过（见 tests/spp.test.mjs 里的真机回包）。
@@ -134,12 +134,16 @@ export class HuaweiHeadset {
   }
 
   async tryRead(cmd, types, timeout = 900, priority = 1) {
+    const started = Date.now();
+    const key = cmd.join("/");
     try {
       if (this.link.active === false) return null;
       const reply = await this.read(cmd, types, timeout, priority);
-      return this.link.active === false ? null : reply;
+      if (this.link.active === false) return null;
+      this.log(`cmd ${key} types=${types.join(",")} ok elapsed=${Date.now() - started}ms`);
+      return reply;
     } catch (err) {
-      this.log(err.message);
+      this.log(`cmd ${key} types=${types.join(",")} fail=${err.message} elapsed=${Date.now() - started}ms`);
       return null;
     }
   }
@@ -608,7 +612,6 @@ export class HuaweiHeadset {
       chips(ui.cnc, modes.map((mode) => ({ key: mode, label: ancModeName(mode) })), this.anc.mode, (mode) =>
         this.setAnc(mode),
       );
-      reveal(ui.cnc, ui.cnc.querySelector(".on"));
     }
 
     pane(ui.eq, Boolean(this.eq?.presets.length));
