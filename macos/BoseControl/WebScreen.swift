@@ -54,6 +54,9 @@ final class WebBundleHandler: NSObject, WKURLSchemeHandler {
 struct WebScreen: NSViewControllerRepresentable {
     func makeNSViewController(context: Context) -> WebController { WebController() }
     func updateNSViewController(_ nsViewController: WebController, context: Context) {}
+    static func dismantleNSViewController(_ nsViewController: WebController, coordinator: ()) {
+        nsViewController.teardown()
+    }
 }
 
 final class NativeSession: BmapClientDelegate {
@@ -83,9 +86,17 @@ final class NativeSession: BmapClientDelegate {
 
 final class WebController: NSViewController, WKScriptMessageHandler, WKNavigationDelegate {
     private let brandKey = "brand"
+    // 桥名一处定义：注册和拆除必须成对，漏一个就会留下一条通向已死页面的回调
+    private static let handlerNames = [
+        "bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices",
+        "exportDiag", "bootError", "appReady", "diagLog",
+    ]
+
     private var web: WKWebView!
     private var assets: WebBundleHandler?
+    private var userContent: WKUserContentController?
     private var session: NativeSession?
+    private var tornDown = false
     // 上一次发给页面的设备列表，用来把轮询里没变化的日志压掉
     private var lastDeviceList = ""
 
@@ -137,10 +148,11 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     override func viewDidLoad() {
         super.viewDidLoad()
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices", "exportDiag", "bootError", "appReady", "diagLog"] {
+        for name in Self.handlerNames {
             // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
+        userContent = uc
         uc.addUserScript(WKUserScript(source: nativeBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         uc.addUserScript(WKUserScript(source: bootBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         // 自定义 scheme 下 localStorage 只在本次会话里有效，品牌得由原生端记住，
@@ -403,6 +415,21 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         ]
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    /// 拆桥收尾。WKUserContentController 强引用 message handler，所以 WebController → web →
+    /// configuration → uc → self 是个环：不先摘掉 handler，这个 controller 永远不会释放，
+    /// 泄漏的 WKWebView 和 BmapClient（notify 订阅还开着）会和下一个会话抢同一台耳机的回包。
+    func teardown() {
+        guard !tornDown else { return }
+        tornDown = true
+        Diag.log("页面卸载：拆桥并断开连接", stage: "H")
+        session?.client.disconnect()
+        session = nil
+        for name in Self.handlerNames { userContent?.removeScriptMessageHandler(forName: name) }
+        userContent = nil
+        web?.stopLoading()
+        web?.removeFromSuperview()
     }
 
     private func js(_ code: String) {

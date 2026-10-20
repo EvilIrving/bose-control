@@ -279,7 +279,7 @@ function exportDiag() {
     `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
       (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
     `不支持 ${missingCapabilities().join(" / ") || "无"}`,
-    `页面日志 ${logCount()} 行（内存兜底，历史以原生持久文件为准）`,
+    `页面日志 ${logCount()} 行（历史以原生持久文件为准）`,
   ];
   const snap = logSnapshot();
   header.push(`页面落盘 ${snap.persisted ? "正常" : "不可用"}`,

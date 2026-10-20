@@ -203,6 +203,16 @@ class BmapBridge(
         }
     }
 
+    /**
+     * Activity 销毁时收尾。WebView 和桥必须一起走：旧实例留着的话它那条 GATT 通知注册
+     * 还开着，同一台耳机的每条回包会被两个页面各记一遍，诊断里就是两条 session 在抢。
+     */
+    fun release() {
+        Diag.add("bt", "release 桥 session=$session gatt=${gatt != null} spp=${spp != null}")
+        session = ""
+        close()
+    }
+
     /** 页面问平台能力：能走哪几条路、有没有设备中心。 */
     @JavascriptInterface
     fun platform(): String {

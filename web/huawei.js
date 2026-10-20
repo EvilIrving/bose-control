@@ -111,6 +111,8 @@ export class HuaweiHeadset {
     this.gestures = null;
     this.autoPause = null;
     this.lowLatency = null;
+    this.canPrefer = null;
+    this.gestureTimer = null;
     this.quality = null;
     this.voice = null;
     this.dual = null;
@@ -355,6 +357,10 @@ export class HuaweiHeadset {
     if (this.link.active === false) return;
     const enabled = await this.probeRetry(CMD.dualRead, [1]);
     if (!enabled) return;
+    // 「优先设备」不是每代都支持：真机日志里写这条 5 次零回包。
+    // 先读一次，读不到就不摆这个按钮，别让用户点了个没反应的键。
+    const prefer = await this.tryRead(CMD.dualPrefer, [1], 800, 1);
+    this.canPrefer = Boolean(prefer);
     this.dual = { enabled: num(enabled, 1) === 1, devices: [] };
     await this.loadDevices();
   }
@@ -375,13 +381,22 @@ export class HuaweiHeadset {
   }
 
   onPacket(packet) {
-    const name = KEY[keyOf(packet)];
+    const key = keyOf(packet);
+    const name = KEY[key];
+    // 真机日志里出现的手势回显：1/39（三击写回显）、43/37（长按类回显）。
+    // 它们不在命令表里，以前直接忽略，界面就停在旧值。
+    if (!name && (key === "1/39" || key === "43/37")) {
+      this.scheduleGestureReload();
+      return;
+    }
     if (name === "dualList") {
-      if (!this.collecting) return;
+      // 耳机是按设备一条条推的，而且列表变化时会随时再推。
+      // 以前只在 1.2 秒收集窗口内接受，窗口外的推送全被丢掉（真机日志里 45 条），
+      // 结果另一台设备连上/断开时界面不会变。
       const mac = hexLookup(packet, 4);
-      if (!mac) return;
+      if (!mac || !this.dual) return;
       const state = num(packet, 5) ?? 0;
-      this.dual?.devices.push({
+      const entry = {
         index: num(packet, 3) ?? 0,
         mac,
         name: text(packet, 9),
@@ -389,11 +404,21 @@ export class HuaweiHeadset {
         playing: state === 9,
         preferred: num(packet, 7) === 1,
         autoConnect: num(packet, 8) === 1,
-      });
+      };
+      const at = this.dual.devices.findIndex((item) => item.mac === entry.mac);
+      if (at >= 0) this.dual.devices[at] = entry;
+      else this.dual.devices.push(entry);
+      this.dual.devices.sort((a, b) => a.index - b.index);
+      if (!this.collecting) this.refresh();
       return;
     }
     if (name === "dualEvent") {
       this.loadDual().then(() => this.refresh());
+      return;
+    }
+    if (name === "doubleRead" || name === "tripleRead") {
+      // 耳机端改过手势后会把回显推上来；重新读一遍，界面不至于停在旧值
+      this.scheduleGestureReload();
       return;
     }
     if (name === "eqRead") {
@@ -523,6 +548,17 @@ export class HuaweiHeadset {
     await sleep(1500);
     await this.loadDual();
     this.refresh();
+  }
+
+  // 手势回显可能连着来，合并成一次重读
+  scheduleGestureReload() {
+    if (this.gestureTimer) return;
+    this.gestureTimer = setTimeout(async () => {
+      this.gestureTimer = null;
+      if (this.link.active === false) return;
+      await this.loadGestures();
+      this.refresh();
+    }, 350);
   }
 
   async preferPeer(mac) {
@@ -752,8 +788,10 @@ export class HuaweiHeadset {
       add(t("autoConnect"), device.autoConnect, () =>
         this.peerCommand(device.autoConnect ? "autoOff" : "autoOn", device.mac),
       );
-      if (device.preferred) add(t("preferred"), true, () => this.refreshPeers());
-      else add(t("preferred"), false, () => this.preferPeer(device.mac));
+      if (this.canPrefer) {
+        if (device.preferred) add(t("preferred"), true, () => this.refreshPeers());
+        else add(t("preferred"), false, () => this.preferPeer(device.mac));
+      }
 
       row.append(head, acts);
       ui.devices.appendChild(row);

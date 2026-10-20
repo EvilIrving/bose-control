@@ -299,7 +299,8 @@ export class HeadsetLink {
       onSend();
       const chunks = this.codec.chunks(packetBytes, this.link);
       const via = this.bridge ? "bridge" : this.nativeOn ? "native" : "webble";
-      logLine("tx", `write ${packetBytes.length}B → ${chunks.length} 包 via ${via} key=${this.codec.key(this.codec.header(packetBytes))}`, { attemptId: this._token });
+      // 写命令必须带原始字节：出事时（比如把值写进了写命令）这是唯一能复现的东西
+      logLine("tx", `write ${packetBytes.length}B → ${chunks.length} 包 via ${via} key=${this.codec.key(this.codec.header(packetBytes))} ${toHex(packetBytes)}`, { attemptId: this._token });
       for (const chunk of chunks) {
         this._check(epoch);
         if (this.bridge) this.bridge.send(chunk);

@@ -66,7 +66,10 @@ export function createBoseSession({ link, ui, state, refresh, log }) {
 // 所以首轮只等很短；没回的挂到后台用长一点的超时补一次 —— 界面不等它。
 const READ_TIMEOUT = 500;
 const RETRY_TIMEOUT = 1000;
-const DETAIL_TIMEOUT = 600;
+// 设备信息整块（MAC / 序列号 / GUID / 原厂名称…）耳机回得慢：QC Ultra 2 上实测 1.4s 上下，
+// 600ms 那一档会把已经读到的值当超时丢掉，而这批详情本来就在后台读（load() 不等它），
+// 所以给它一个跟设备实际延迟同量级的预算。
+const DETAIL_TIMEOUT = 2000;
 const WRITE_TIMEOUT = 2000;
 // 耳机上报的模式名可能是英文（Quiet/Aware…），按当前界面语言给中文或英文；
 // 已经是中文的（设备语音语言为中文时）原样显示。

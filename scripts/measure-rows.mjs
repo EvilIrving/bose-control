@@ -4,6 +4,7 @@
 //
 // 为什么不用 `chrome --headless --window-size=390,844`：macOS 上那个窗口会被夹到 500 宽，
 // 量出来是桌面分支的布局。这里走 CDP 的 Emulation.setDeviceMetricsOverride 拿真视口。
+import { writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import { spawn } from "node:child_process";
 import { readFile } from "node:fs/promises";
@@ -16,11 +17,13 @@ const WEB = join(ROOT, "web");
 const CHROME =
   process.env.CHROME ||
   "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
-const WIDTHS = process.argv.slice(2).map(Number).filter(Boolean);
+const argv = process.argv.slice(2).filter((_, i, all) => all[i - 1] !== "--shot");
+const WIDTHS = argv.map(Number).filter(Boolean);
 const sizes = WIDTHS.length ? WIDTHS : [390, 1280];
 
 const FIXTURE = `<!DOCTYPE html>
-<html><head><meta name="viewport" content="width=device-width, initial-scale=1">
+<html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <link rel="stylesheet" href="/styles.css"></head><body>
 <section id="settings" class="open"></section>
 <script type="module">
@@ -54,14 +57,17 @@ for (const [id, items, sel] of rows) {
   chips(el, items, sel < 0 ? null : sel, () => {});
 }
 // Bose 的快捷动作：#shortcut 只是容器，chip 行在里面（华为往里放手势组）
+// 真机 QC Ultra 2 只报 4 项（supported 1/14/16/19，当前值 19），另外量一遍报 8 项的情况
 const groups = document.createElement("div");
 groups.id = "shortcut";
-const row = document.createElement("div");
-row.className = "chips";
-row.id = "shortcut-row";
-groups.appendChild(row);
 box.append(groups);
-chips(row, [-1, 0, 1, 2, 7, 10, 18, 19].map((c) => ({ key: c, label: L.tapActionName(c) })), 0, () => {});
+for (const [id, codes] of [["shortcut-4", [1, 14, 16, 19]], ["shortcut-8", [-1, 0, 1, 2, 3, 10, 18, 19]]]) {
+  const row = document.createElement("div");
+  row.className = "chips";
+  row.id = id;
+  groups.appendChild(row);
+  chips(row, codes.map((c) => ({ key: c, label: L.actionName(c) })), codes[codes.length - 1], () => {});
+}
 </script></body></html>`;
 
 const MIME = { ".css": "text/css", ".js": "text/javascript", ".png": "image/png", ".html": "text/html" };
@@ -131,7 +137,7 @@ ws.addEventListener("message", (ev) => {
 
 const MEASURE = `JSON.stringify([...document.querySelectorAll(".chips, .levels")].map((el) => ({
   id: el.id || "(内层)", view: el.clientWidth, content: el.scrollWidth, kids: el.children.length,
-}))`;
+})))`;
 
 const evalRows = async () => {
   for (let i = 0; i < 30; i++) {
@@ -142,6 +148,11 @@ const evalRows = async () => {
   throw new Error("页面没画出行来");
 };
 
+// --shot 目录：每个宽度 × 每种语言存一张图，用来看有没有换行、溢出、焦点环被裁
+const shotDir = process.argv.includes("--shot")
+  ? process.argv[process.argv.indexOf("--shot") + 1]
+  : null;
+
 console.log("行".padEnd(12) + sizes.map((w) => `${w}px 溢出`.padEnd(12)).join("") );
 for (const lang of ["zh", "en"]) {
   const results = new Map();
@@ -150,6 +161,10 @@ for (const lang of ["zh", "en"]) {
     await send("Page.navigate", { url: `http://127.0.0.1:${port}/?lang=${lang}` });
     await sleep(700);
     const rows = await evalRows();
+    if (shotDir) {
+      const { data } = await send("Page.captureScreenshot", { format: "png", captureBeyondViewport: true });
+      await writeFile(join(shotDir, `${lang}-${width}.png`), Buffer.from(data, "base64"));
+    }
     for (const r of rows) results.set(r.id, { ...(results.get(r.id) ?? {}), [width]: r.content - r.view });
   }
   console.log(`\n${lang === "zh" ? "中文" : "English"}`);

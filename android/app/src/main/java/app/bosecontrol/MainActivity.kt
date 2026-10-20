@@ -11,6 +11,7 @@ import android.os.Bundle
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.ViewGroup
 import android.webkit.ConsoleMessage
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
@@ -225,6 +226,16 @@ class MainActivity : ComponentActivity() {
             pending = null
             requestBtPermission(action)
         }
+    }
+
+    override fun onDestroy() {
+        // WebView、桥、GATT 都得跟着 Activity 一起销毁。只留一个的话（比如配置变化重建、
+        // 后台被回收后重建），旧页面会继续收到同一台耳机的通知：耳机上挂着两条 GATT 通知
+        // 注册，两条 session 抢同一份回包，旧页面还只收不发。
+        bridge.release()
+        (web.parent as? ViewGroup)?.removeView(web)
+        web.destroy()
+        super.onDestroy()
     }
 
     companion object {

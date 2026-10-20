@@ -47,6 +47,9 @@ final class WebBundleHandler: NSObject, WKURLSchemeHandler {
 struct WebScreen: UIViewControllerRepresentable {
     func makeUIViewController(context: Context) -> WebController { WebController() }
     func updateUIViewController(_ uiViewController: WebController, context: Context) {}
+    static func dismantleUIViewController(_ uiViewController: WebController, coordinator: ()) {
+        uiViewController.teardown()
+    }
 }
 
 final class NativeSession: BleClientDelegate {
@@ -73,9 +76,17 @@ final class NativeSession: BleClientDelegate {
 }
 
 final class WebController: UIViewController, WKScriptMessageHandler, WKNavigationDelegate {
+    // 桥名一处定义：注册和拆除必须成对，漏一个就会留下一条通向已死页面的回调
+    private static let handlerNames = [
+        "bleScan", "bleConnect", "sendData", "bleDisconnect",
+        "exportDiag", "bootError", "appReady", "diagLog",
+    ]
+
     private var web: WKWebView!
     private var assets: WebBundleHandler?
+    private var userContent: WKUserContentController?
     private var session: NativeSession?
+    private var tornDown = false
 
     private let bootBridgeJS = """
     (function () {
@@ -118,10 +129,11 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         super.viewDidLoad()
         view.backgroundColor = UIColor(red: 10.0 / 255, green: 10.0 / 255, blue: 10.0 / 255, alpha: 1)
         let uc = WKUserContentController()
-        for name in ["bleScan", "bleConnect", "sendData", "bleDisconnect", "exportDiag", "bootError", "appReady", "diagLog"] {
+        for name in Self.handlerNames {
             // 页面启动确认与启动阶段错误，见 bootBridgeJS
             uc.add(self, name: name)
         }
+        userContent = uc
         uc.addUserScript(WKUserScript(source: bootBridgeJS, injectionTime: .atDocumentStart, forMainFrameOnly: true))
         let conf = WKWebViewConfiguration()
         conf.userContentController = uc
@@ -317,6 +329,21 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         } else {
             js("onDiagExported(\(jsonText(outcome.payload)))")
         }
+    }
+
+    /// 拆桥收尾。WKUserContentController 强引用 message handler，所以 WebController → web →
+    /// configuration → uc → self 是个环：不先摘掉 handler，deinit 永远不会被调用，
+    /// 泄漏的 WKWebView 和 BleClient（notify 订阅还开着）会和下一个会话抢同一台耳机的回包。
+    func teardown() {
+        guard !tornDown else { return }
+        tornDown = true
+        Diag.log("页面卸载：拆桥并断开连接", stage: "H")
+        session?.client.disconnect()
+        session = nil
+        for name in Self.handlerNames { userContent?.removeScriptMessageHandler(forName: name) }
+        userContent = nil
+        web?.stopLoading()
+        web?.removeFromSuperview()
     }
 
     private func lockGestures() {
