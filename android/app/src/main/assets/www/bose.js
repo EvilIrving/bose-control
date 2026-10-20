@@ -178,7 +178,6 @@ function renderModes() {
     btn.addEventListener("click", () => openEditor(free.index));
     ui.modes.appendChild(btn);
   }
-  ui.modes.classList.toggle("dense", modes.length + (free ? 1 : 0) <= 7);
 }
 
 function cncMax() {

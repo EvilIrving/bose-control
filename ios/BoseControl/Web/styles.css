@@ -446,12 +446,17 @@ h1 {
   white-space: nowrap;
 }
 
+/* chip 行只有一行：放不下就横向滑，不换行、不缩字号、不截断 */
 .chips,
 .levels,
 .row {
   display: flex;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
   gap: 0.5rem;
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
 }
 
 .row {
@@ -509,26 +514,14 @@ section h2 {
 }
 
 #modes .chip {
+  flex: none;
   font-size: 0.9rem;
   padding-left: 0.85rem;
   padding-right: 0.85rem;
 }
 
-#modes.dense {
-  flex-wrap: nowrap;
-}
-
-#modes.dense .chip {
-  flex: none;
-  min-width: 0;
-  max-width: 7rem;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
 /* 分段控件：轨道是填充色，选中项反白 */
 .levels {
-  flex-wrap: nowrap;
   gap: 0.25rem;
   width: 100%;
   padding: 0.25rem;
@@ -537,8 +530,7 @@ section h2 {
 }
 
 .levels button {
-  flex: 1;
-  min-width: 0;
+  flex: 1 0 auto;
   min-height: calc(var(--control) - 0.5rem);
   padding: 0 0.95rem;
 }
@@ -612,6 +604,8 @@ section h2 {
 
 #brand {
   justify-content: center;
+  /* 溢出时居中会把开头那几颗挤到滑不到的地方，支持的浏览器按 safe 居中 */
+  justify-content: safe center;
   margin-top: 0.9rem;
 }
 
