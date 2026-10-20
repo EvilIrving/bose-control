@@ -647,6 +647,29 @@ async function switchMode(index) {
   if (state.editing && state.editing.index !== index) closeEditor();
   state.currentMode = index;
   renderModes();
+
+  // 模式是「消噪等级 + 自适应 + 空间音频 + 风噪 + 消噪开关」一整套：
+  // 切完必须把这些值读回来，否则后面动一个滑轨（会整包重写）就把模式里的设置改回去了。
+  const config = await tryAsk(
+    get(FBLOCK.MODES, FUNC.MODE_CONFIG, Uint8Array.of(index)),
+    `m${index}`,
+  );
+  if (!config) return;
+  const mode = parseModeConfig(config.payload);
+  if (!mode) return;
+  const applied = {
+    cnc: mode.cnc ?? state.cfg.cnc,
+    auto: Boolean(mode.auto),
+    spatial: mode.spatial ?? state.cfg.spatial,
+    wind: Boolean(mode.wind),
+    anc: mode.anc !== false,
+  };
+  state.cfg = applied;
+  if (state.cnc) state.cnc = { ...state.cnc, step: applied.cnc, enabled: applied.anc };
+  log(`mode ${index} applied cnc=${applied.cnc} auto=${applied.auto} spatial=${applied.spatial} wind=${applied.wind} anc=${applied.anc}`);
+  renderCnc();
+  renderSpatial();
+  renderToggles();
 }
 
 function openEditor(index) {
