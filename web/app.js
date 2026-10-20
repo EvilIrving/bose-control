@@ -84,6 +84,7 @@ const ui = {
   controls: $("controls"),
   modes: $("modes"),
   cnc: $("cnc"),
+  cncToggles: $("cnc-toggles"),
   eq: $("eq"),
   spatial: $("spatial"),
   sidetone: $("sidetone"),
@@ -169,6 +170,18 @@ function log(line, scope = "app") {
 // 原生导出的回执：成功/失败都要有反馈，设置页重绘之后结果还在
 let diagExport = null;
 
+// 回执不能塞进 #diag-actions：那行是 nowrap 的横向滚动容器，路径一长就被滑出屏
+function diagNote() {
+  let note = document.getElementById("diag-export-state");
+  if (!note && ui.diagActions) {
+    note = document.createElement("span");
+    note.id = "diag-export-state";
+    note.className = "diag-note";
+    ui.diagActions.after(note);
+  }
+  return note;
+}
+
 function exportText(result) {
   if (!result) return "";
   const fill = (key) =>
@@ -187,13 +200,7 @@ window.onDiagExported = (info) => {
   diagExport = exportResult(info);
   const text = exportText(diagExport);
   logLine(diagExport.state === "saved" ? "app" : "err", text);
-  let note = document.getElementById("diag-export-state");
-  if (!note && ui.diagActions) {
-    note = document.createElement("span");
-    note.id = "diag-export-state";
-    note.className = "diag-note";
-    ui.diagActions.appendChild(note);
-  }
+  const note = diagNote();
   if (note) note.textContent = text;
 };
 
@@ -306,18 +313,14 @@ function nativeEnv() {
 
 function renderDiag() {
   ui.diagActions.replaceChildren();
-  if (canExportDiag()) {
+  const canExport = canExportDiag();
+  if (canExport) {
     const btn = chip(t("exportDiag"), false);
     btn.addEventListener("click", exportDiag);
     ui.diagActions.appendChild(btn);
-    if (diagExport) {
-      const note = document.createElement("span");
-      note.id = "diag-export-state";
-      note.className = "diag-note";
-      note.textContent = exportText(diagExport);
-      ui.diagActions.appendChild(note);
-    }
   }
+  const note = diagNote();
+  if (note) note.textContent = canExport && diagExport ? exportText(diagExport) : "";
 }
 
 function setPage(page) {

@@ -205,6 +205,12 @@ button:focus-visible {
   outline-offset: 2px;
 }
 
+/* chip 行是 overflow 容器，向外的焦点环会被上下裁掉，改成向内画 */
+.chips button:focus-visible,
+.row button:focus-visible {
+  outline-offset: -3px;
+}
+
 button:disabled {
   opacity: 0.4;
 }
@@ -398,6 +404,7 @@ h1 {
 }
 
 #go {
+  flex: none;
   min-height: var(--control);
   border-color: var(--border);
   background: transparent;
@@ -762,20 +769,6 @@ section h2 {
 }
 
 /* 手势是一组一组堆起来的，不要并排成两列 */
-#shortcut {
-  display: grid;
-  gap: 0.9rem;
-}
-
-#shortcut .gesture {
-  width: 100%;
-  min-width: 0;
-}
-
-#shortcut .gesture + .gesture {
-  margin-top: 0;
-}
-
 .gesture + .gesture {
   margin-top: 0.9rem;
 }
@@ -957,4 +950,25 @@ input.text:focus {
   color: var(--muted-foreground);
   font-size: 0.78rem;
   word-break: break-all;
+}
+
+/* 模式编辑器：每项一行，左边标签右边控件，顺序和设备页一致 */
+.edit-row {
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+  margin-top: 0.6rem;
+}
+
+.edit-row .edit-label {
+  flex: none;
+  width: 5.2rem;
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+}
+
+.edit-row .chips,
+.edit-row .band {
+  flex: 1;
+  min-width: 0;
 }

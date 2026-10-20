@@ -57,7 +57,7 @@ import {
   t,
   voiceLanguageName,
 } from "./labels.js";
-import { chip, chips, fillRows, pane } from "./ui.js";
+import { chip, chips, fillRows, pane, refill, reveal } from "./ui.js";
 
 // Bose 的 BMAP 实现：读全量状态、写各项设置、把面板画出来。
 // 宿主只认下面这几个入口：load() / render() / renderSettings() / diagRows()。
@@ -160,23 +160,25 @@ function renderModes() {
   const modes = usableModes();
   const free = freeSlot();
   pane(ui.modes, modes.length > 0 || Boolean(free));
-  ui.modes.innerHTML = "";
-  for (const mode of modes) {
-    const btn = chip(modeLabel(mode), mode.index === state.currentMode);
-    btn.addEventListener("click", () => {
-      if (mode.editable && mode.index === state.currentMode) openEditor(mode.index);
-      else switchMode(mode.index);
-    });
-    ui.modes.appendChild(btn);
-  }
-  if (free) {
+  refill(ui.modes, (row) => {
+    for (const mode of modes) {
+      const btn = chip(modeLabel(mode), mode.index === state.currentMode);
+      btn.addEventListener("click", () => {
+        if (mode.editable && mode.index === state.currentMode) openEditor(mode.index);
+        else switchMode(mode.index);
+      });
+      row.appendChild(btn);
+    }
+    if (!free) return;
     const btn = chip("＋", false);
     btn.classList.add("plus");
     btn.setAttribute("aria-label", t("create"));
     btn.title = t("create");
     btn.addEventListener("click", () => openEditor(free.index));
-    ui.modes.appendChild(btn);
-  }
+    row.appendChild(btn);
+  });
+  // 机身按键也能切模式，切到的那颗可能在滑走的位置上
+  reveal(ui.modes, ui.modes.querySelector(".on"));
 }
 
 function cncMax() {
@@ -319,22 +321,42 @@ function renderVoice() {
   );
 }
 
+// 消噪这一组：滑轨 + 自动消噪 / 风噪滤除两个开关。
+// 自动消噪开着时由耳机按环境自己调等级，手动值不生效；拖滑轨就会把手动值写下去并关掉自动。
+function renderCncToggles() {
+  if (link.active === false) return;
+  const box = ui.cncToggles;
+  if (!box) return;
+  box.innerHTML = "";
+  if (!state.hasAudioSettings) {
+    pane(box, false);
+    return;
+  }
+  const auto = chip(t("autoCnc"), Boolean(state.cfg.auto));
+  auto.addEventListener("click", () => setAuto(!state.cfg.auto));
+  const wind = chip(t("wind"), Boolean(state.cfg.wind));
+  wind.addEventListener("click", () => setWind(!state.cfg.wind));
+  box.append(auto, wind);
+  pane(box, true);
+}
+
 function renderToggles() {
   if (link.active === false) return;
+  renderCncToggles();
   const items = [
-    { key: "wind", label: t("wind"), on: state.cfg.wind, show: state.hasAudioSettings, run: () => setWind(!state.cfg.wind) },
     { key: "mp", label: t("multipoint"), on: state.multipoint?.enabled, show: state.multipoint != null, run: () => setMultipoint(!state.multipoint.enabled) },
     { key: "talk", label: t("conversation"), on: state.conversation, show: state.conversation != null, run: () => setConversation(!state.conversation) },
   ];
   let n = 0;
-  ui.toggles.innerHTML = "";
-  for (const item of items) {
-    if (item.show === false) continue;
-    n += 1;
-    const btn = chip(item.label, item.on);
-    btn.addEventListener("click", item.run);
-    ui.toggles.appendChild(btn);
-  }
+  refill(ui.toggles, (row) => {
+    for (const item of items) {
+      if (item.show === false) continue;
+      n += 1;
+      const btn = chip(item.label, item.on);
+      btn.addEventListener("click", item.run);
+      row.appendChild(btn);
+    }
+  });
   pane(ui.toggles, n > 0);
 }
 
@@ -346,14 +368,15 @@ function renderBehaviour() {
     { key: "play", label: t("autoPlay"), on: state.autoPlay, show: state.autoPlay != null, run: () => setAutoPlayPause(!state.autoPlay) },
   ];
   let n = 0;
-  ui.behaviour.innerHTML = "";
-  for (const item of items) {
-    if (item.show === false) continue;
-    n += 1;
-    const btn = chip(item.label, item.on);
-    btn.addEventListener("click", item.run);
-    ui.behaviour.appendChild(btn);
-  }
+  refill(ui.behaviour, (row) => {
+    for (const item of items) {
+      if (item.show === false) continue;
+      n += 1;
+      const btn = chip(item.label, item.on);
+      btn.addEventListener("click", item.run);
+      row.appendChild(btn);
+    }
+  });
   pane(ui.behaviour, n > 0);
 }
 
@@ -396,8 +419,14 @@ function renderShortcut() {
     ? `${t("shortcut")} · ${pressName(config.eventType)}`
     : t("shortcut");
   if (!config || !config.supported.length) return;
+  // #shortcut 装的是「组」（华为往里放手势组），chip 行自己建才吃得到 .chips 的横向滚动。
+  // 每次清干净：不清就会捡到上一个品牌留下的 .chips，把按钮画进手势组里
+  const row = document.createElement("div");
+  row.className = "chips";
+  ui.shortcut.innerHTML = "";
+  ui.shortcut.appendChild(row);
   chips(
-    ui.shortcut,
+    row,
     config.supported.map((id) => ({ key: id, label: actionName(id) })),
     config.action,
     setShortcut,
@@ -709,56 +738,85 @@ function renderEditor() {
   field.appendChild(input);
   ui.editor.appendChild(field);
 
-  const band = document.createElement("div");
-  band.className = "band";
-  const label = document.createElement("span");
-  label.textContent = t("cnc");
-  band.appendChild(label);
-  slider(band, {
-    min: 0,
-    max: cncMax(),
-    value: Math.min(edit.cnc ?? 0, cncMax()),
-    onChange: (value) => {
-      edit.cnc = value;
-    },
-  });
-  ui.editor.appendChild(band);
-
-  const flags = document.createElement("div");
-  flags.className = "chips";
-  const flag = (key, on, run) => {
-    const btn = chip(t(key), on);
-    btn.addEventListener("click", () => {
-      run();
-      renderEditor();
-    });
-    flags.appendChild(btn);
+  // 顺序跟设备页一致：消噪 → 沉浸式音频 → 风噪滤除 → 自适应 → 机身可切换
+  const labeled = (labelKey, build) => {
+    const wrap = document.createElement("div");
+    wrap.className = "edit-row";
+    const name = document.createElement("span");
+    name.className = "edit-label";
+    name.textContent = t(labelKey);
+    wrap.appendChild(name);
+    wrap.appendChild(build());
+    ui.editor.appendChild(wrap);
+    return wrap;
   };
-  flag("autoCnc", edit.auto, () => {
-    edit.auto = !edit.auto;
-  });
-  flag("wind", edit.wind, () => {
-    edit.wind = !edit.wind;
-  });
-  if (state.favorites) {
-    flag("cycle", edit.cycle, () => {
-      edit.cycle = !edit.cycle;
+
+  labeled("cnc", () => {
+    const band = document.createElement("div");
+    band.className = "band cnc-band";
+    slider(band, {
+      min: 0,
+      max: cncMax(),
+      value: Math.min(edit.cnc ?? 0, cncMax()),
+      onChange: (value) => {
+        edit.cnc = value;
+      },
     });
-  }
-  ui.editor.appendChild(flags);
+    return band;
+  });
 
   if (state.hasAudioSettings) {
-    const spatial = document.createElement("div");
-    spatial.className = "chips";
-    SPATIAL_OPTIONS.forEach((option, optionIndex) => {
-      const btn = chip(pick(option), edit.spatial === optionIndex);
+    labeled("spatial", () => {
+      const row = document.createElement("div");
+      row.className = "chips";
+      SPATIAL_OPTIONS.forEach((option, optionIndex) => {
+        const btn = chip(pick(option), edit.spatial === optionIndex);
+        btn.addEventListener("click", () => {
+          edit.spatial = optionIndex;
+          renderEditor();
+        });
+        row.appendChild(btn);
+      });
+      return row;
+    });
+  }
+
+  labeled("wind", () => {
+    const row = document.createElement("div");
+    row.className = "chips";
+    const btn = chip(t(edit.wind ? "stateOn" : "stateOff"), edit.wind);
+    btn.addEventListener("click", () => {
+      edit.wind = !edit.wind;
+      renderEditor();
+    });
+    row.appendChild(btn);
+    return row;
+  });
+
+  labeled("autoCnc", () => {
+    const row = document.createElement("div");
+    row.className = "chips";
+    const btn = chip(t(edit.auto ? "stateOn" : "stateOff"), edit.auto);
+    btn.addEventListener("click", () => {
+      edit.auto = !edit.auto;
+      renderEditor();
+    });
+    row.appendChild(btn);
+    return row;
+  });
+
+  if (state.favorites) {
+    labeled("cycle", () => {
+      const row = document.createElement("div");
+      row.className = "chips";
+      const btn = chip(t(edit.cycle ? "stateOn" : "stateOff"), edit.cycle);
       btn.addEventListener("click", () => {
-        edit.spatial = optionIndex;
+        edit.cycle = !edit.cycle;
         renderEditor();
       });
-      spatial.appendChild(btn);
+      row.appendChild(btn);
+      return row;
     });
-    ui.editor.appendChild(spatial);
   }
 
   const actions = document.createElement("div");
@@ -911,7 +969,12 @@ async function setSpatial(mode) {
 
 async function setWind(on) {
   if (!(await writeAudioSettings({ ...state.cfg, wind: on }))) return;
-  renderToggles();
+  renderCncToggles();
+}
+
+async function setAuto(on) {
+  if (!(await writeAudioSettings({ ...state.cfg, auto: on, anc: true }))) return;
+  renderCncToggles();
 }
 
 async function setSidetone(level) {
@@ -955,7 +1018,10 @@ async function setStandby(minutes) {
 }
 
 async function setCnc(level) {
-  if (state.hasAudioSettings || state.channel15 === false) {
+  // 自动消噪开着的时候手动等级不会生效：拖滑轨就当成「我要手动」，把 auto 一起关掉
+  if (state.cfg.auto) {
+    if (!(await writeAudioSettings({ ...state.cfg, cnc: level, auto: false, anc: true }))) return;
+  } else if (state.hasAudioSettings || state.channel15 === false) {
     if (!(await writeAudioSettings({ ...state.cfg, cnc: level, anc: true }))) return;
   } else {
     const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪", 800);
@@ -968,6 +1034,8 @@ async function setCnc(level) {
   if (state.cnc) state.cnc.step = level;
   else state.cnc = { steps: cncMax() + 1, step: level, total: cncMax() + 1, enabled: true };
   state.cfg.cnc = level;
+  renderCnc();
+  renderCncToggles();
 }
 
 async function setVoicePrompt(enabled, language) {

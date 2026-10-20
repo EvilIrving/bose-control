@@ -1,6 +1,6 @@
 import { ancModeName, eqPresetName, swipeActionName, t, tapActionName, voiceLocaleName } from "./labels.js";
 import { EMPTY, bytes, createParser, decode, encode, keyOf, num, text } from "./spp.js";
-import { chip, chips, pane } from "./ui.js";
+import { chip, chips, pane, refill, reveal } from "./ui.js";
 
 // 华为耳机的控制命令，取值来自 OpenFreebuds 的 SPP 命令表，
 // 每条都在 FreeClip 2 上实际跑通过（见 tests/spp.test.mjs 里的真机回包）。
@@ -572,6 +572,7 @@ export class HuaweiHeadset {
       chips(ui.cnc, modes.map((mode) => ({ key: mode, label: ancModeName(mode) })), this.anc.mode, (mode) =>
         this.setAnc(mode),
       );
+      reveal(ui.cnc, ui.cnc.querySelector(".on"));
     }
 
     pane(ui.eq, Boolean(this.eq?.presets.length));
@@ -597,12 +598,13 @@ export class HuaweiHeadset {
       toggles.push({ label: t("autoPause"), on: this.autoPause, run: () => this.setAutoPause(!this.autoPause) });
     }
     ui.toggles.className = "chips";
-    ui.toggles.innerHTML = "";
-    for (const item of toggles) {
-      const btn = chip(item.label, item.on);
-      btn.addEventListener("click", item.run);
-      ui.toggles.appendChild(btn);
-    }
+    refill(ui.toggles, (row) => {
+      for (const item of toggles) {
+        const btn = chip(item.label, item.on);
+        btn.addEventListener("click", item.run);
+        row.appendChild(btn);
+      }
+    });
     pane(ui.toggles, toggles.length > 0);
 
     this.renderSettings();
