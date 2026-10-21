@@ -439,7 +439,7 @@ test("快捷动作文案覆盖官方枚举，未知值回落到编号", async ()
 test("自定义模式与快捷键的容器都在页面里", () => {
   const dir = dirname(fileURLToPath(import.meta.url));
   const html = readFileSync(join(dir, "../web/index.html"), "utf8");
-  for (const id of ["mode-editor", "transport", "rename", "shortcut", "favorites", "devices", "headset-actions"]) {
+  for (const id of ["mode-editor", "transport", "rename", "shortcut", "favorites", "playing", "headset-actions"]) {
     assert.match(html, new RegExp(`id="${id}"`), `缺少 ${id}`);
   }
   assert.ok(html.indexOf('id="shortcut"') > html.indexOf('id="settings"'), "快捷键在设置页");

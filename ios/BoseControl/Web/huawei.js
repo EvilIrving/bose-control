@@ -28,17 +28,12 @@ const CMD = {
   voiceWrite: [0x0c, 0x01],
   dualRead: [0x2b, 0x2f],
   dualList: [0x2b, 0x31],
-  dualPrefer: [0x2b, 0x32],
-  dualCommand: [0x2b, 0x33],
   dualEvent: [0x2b, 0x36],
   inEar: [0x2b, 0x03],
 };
 
 const LEFT = 1;
 const RIGHT = 2;
-
-// 2b33 的用法：参数类型就是动作号，值是对端的 MAC
-const PEER = { connect: 1, disconnect: 2, autoOn: 4, autoOff: 5 };
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -113,7 +108,6 @@ export class HuaweiHeadset {
     this.gestureRows = new Map();
     this.autoPause = null;
     this.lowLatency = null;
-    this.canPrefer = null;
     this.gestureTimer = null;
     this.quality = null;
     this.voice = null;
@@ -162,7 +156,7 @@ export class HuaweiHeadset {
     await this.loadPass(false, false);
     this.refresh();
     if (this.link.active === false) return false;
-    // 手势和已配对设备只影响设置页，放后台读
+    // 手势和双连接状态只影响设置页，放后台读
     void Promise.all([this.loadGestures(), this.loadDual()]).then(() => this.refresh());
     if (!this.answered()) {
       // 一条都没回来：可能连着但耳机还没醒。补一轮再判断「不支持」
@@ -186,7 +180,7 @@ export class HuaweiHeadset {
     this.refresh();
   }
 
-  // 开关类项不在启动的关键路径上；手势和已配对设备更是只在设置页里看得到
+  // 开关类项不在启动的关键路径上；手势和双连接状态更是只在设置页里看得到
   missing() {
     return (
       !this.info.model || !this.battery || !this.anc || !this.eq ||
@@ -363,10 +357,6 @@ export class HuaweiHeadset {
     if (this.link.active === false) return;
     const enabled = await this.probeRetry(CMD.dualRead, [1]);
     if (!enabled) return;
-    // 「优先设备」不是每代都支持：真机日志里写这条 5 次零回包。
-    // 先读一次，读不到就不摆这个按钮，别让用户点了个没反应的键。
-    const prefer = await this.tryRead(CMD.dualPrefer, [1], 800, 1);
-    this.canPrefer = Boolean(prefer);
     this.dual = { enabled: num(enabled, 1) === 1, devices: [] };
     await this.loadDevices();
   }
@@ -543,19 +533,6 @@ export class HuaweiHeadset {
     return Uint8Array.from(mac.split(":").map((part) => parseInt(part, 16)));
   }
 
-  // 连接 / 断开 / 自动连接都是「发一条就走」，回包只有状态码，效果靠 2b36 事件和重新枚举确认
-  async peerCommand(kind, mac) {
-    try {
-      await this.link.write(encode(CMD.dualCommand, [[PEER[kind], this.macBytes(mac)]]));
-    } catch (err) {
-      this.log(err.message);
-      return;
-    }
-    await sleep(1500);
-    await this.loadDual();
-    this.refresh();
-  }
-
   // 手势回显可能连着来，合并成一次重读
   scheduleGestureReload() {
     if (this.gestureTimer) return;
@@ -565,23 +542,6 @@ export class HuaweiHeadset {
       await this.loadGestures();
       this.refresh();
     }, 350);
-  }
-
-  async preferPeer(mac) {
-    try {
-      await this.link.write(encode(CMD.dualPrefer, [[1, this.macBytes(mac)]]));
-    } catch (err) {
-      this.log(err.message);
-      return;
-    }
-    await sleep(1200);
-    await this.loadDual();
-    this.refresh();
-  }
-
-  async refreshPeers() {
-    await this.loadDual();
-    this.refresh();
   }
 
   async setSwipe(code) {
@@ -660,7 +620,7 @@ export class HuaweiHeadset {
     this.renderGestures();
     this.renderVoice();
     this.renderQuality();
-    this.renderDevices();
+    this.renderPlaying();
   }
 
   renderGestures() {
@@ -780,53 +740,13 @@ export class HuaweiHeadset {
     );
   }
 
-  renderDevices() {
+  // 只留一行「正在播放」：哪台设备在往耳机推声音。断开/连接/自动连接/常用那排操作
+  // 对端设备的能力，用户在自己手机/电脑上做更自然，不值得占设置页一屏
+  renderPlaying() {
     const ui = this.ui;
-    const dual = this.dual;
-    pane(ui.devices, Boolean(dual));
-    if (!dual) return;
-    ui.devices.innerHTML = "";
-
-    for (const device of dual.devices) {
-      const row = document.createElement("div");
-      row.className = "peer";
-
-      const head = document.createElement("div");
-      head.className = "peer-head";
-      const name = document.createElement("span");
-      name.textContent = device.name || device.mac;
-      const state = document.createElement("b");
-      state.textContent = device.playing ? t("playing") : device.connected ? t("connected") : "—";
-      head.append(name, state);
-
-      const acts = document.createElement("div");
-      acts.className = "chips";
-      const add = (label, on, run) => {
-        const btn = chip(label, on);
-        btn.addEventListener("click", run);
-        acts.appendChild(btn);
-        return btn;
-      };
-      if (device.connected) add(t("disconnect"), false, () => this.peerCommand("disconnect", device.mac));
-      else add(t("connect"), false, () => this.peerCommand("connect", device.mac));
-      add(t("autoConnect"), device.autoConnect, () =>
-        this.peerCommand(device.autoConnect ? "autoOff" : "autoOn", device.mac),
-      );
-      if (this.canPrefer) {
-        if (device.preferred) add(t("preferred"), true, () => this.refreshPeers());
-        else add(t("preferred"), false, () => this.preferPeer(device.mac));
-      }
-
-      row.append(head, acts);
-      ui.devices.appendChild(row);
-    }
-
-    const actions = document.createElement("div");
-    actions.className = "chips";
-    const refresh = chip(t("refresh"), false);
-    refresh.addEventListener("click", () => this.refreshPeers());
-    actions.appendChild(refresh);
-    ui.devices.appendChild(actions);
+    const playing = this.dual?.devices.find((device) => device.playing);
+    pane(ui.playing, Boolean(playing));
+    ui.playing.textContent = playing ? playing.name || playing.mac : "";
   }
 }
 

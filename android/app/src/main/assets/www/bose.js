@@ -509,8 +509,8 @@ function applyCnc(reply) {
 
 async function loadDevice() {
   retries = [];
-  // 「已配对设备」是耳机自己的配对表，对控制没用，Bose 这边不再显示也不再读
-  if (ui.devices) pane(ui.devices, false);
+  // 「正在播放」是华为双连接列表里的状态，Bose 没有这一项，先隐藏
+  if (ui.playing) pane(ui.playing, false);
   // 第一批：屏幕上立刻要看的东西。彼此不依赖，一起飞，屏幕不再等全量读完才出内容。
   const [versionReply] = await Promise.all([
     tryAsk(get(FBLOCK.PRODUCT, FUNC.BMAP_VERSION), "init", READ_TIMEOUT),
@@ -614,7 +614,7 @@ async function loadDetail() {
       state.info.component = parseComponentId(reply.payload);
     }),
     readDetail(get(FBLOCK.PRODUCT, FUNC.LE_AUDIO), "LE Audio", (reply) => {
-      state.info.leAudio = parseFlag(reply.payload) ? "支持" : "不支持";
+      state.info.leAudio = Boolean(parseFlag(reply.payload));
     }),
     readDetail(get(FBLOCK.PRODUCT, FUNC.MANUFACTURED), "生产日期", (reply) => {
       state.info.made = parseManufactured(reply.payload);

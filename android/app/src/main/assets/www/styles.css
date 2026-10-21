@@ -638,13 +638,6 @@ section h2 {
   text-align: left;
 }
 
-/* 名字 + 状态点一行排的通用行容器（设备页的块也用这个） */
-.peer-head {
-  display: flex;
-  align-items: center;
-  gap: 0.45rem;
-}
-
 /* 设备名单独一行，永远不换行：单列双列都一样，放不下只出省略号 */
 .peer-card .peer-name {
   font-weight: 600;
@@ -858,46 +851,6 @@ input.text:focus {
 
 #mode-editor > * + * {
   margin-top: 0.7rem;
-}
-
-#devices {
-  display: grid;
-  gap: 0.6rem;
-}
-
-#devices .peer {
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.9rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--card);
-}
-
-#devices .peer-head {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-#devices div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 1rem;
-}
-
-#devices span {
-  font-variant-numeric: tabular-nums;
-  word-break: break-all;
-}
-
-#devices b {
-  flex: none;
-  color: var(--muted-foreground);
-  font-size: 0.85rem;
-  font-weight: 400;
 }
 
 [hidden] {
