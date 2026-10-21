@@ -55,19 +55,19 @@ class MainActivity : ComponentActivity() {
     fun locationEnabledOrNull(): Boolean? {
         val lm = getSystemService(LocationManager::class.java)
         if (lm == null) {
-            Diag.add("bt", "定位状态读不到：没有 LocationManager")
+            Diag.fail("sys", "定位状态读不到：没有 LocationManager")
             return null
         }
         // isLocationEnabled() 是 API 28 才有的，minSdk 26 只能走 AndroidX 的兼容实现
         return runCatching { LocationManagerCompat.isLocationEnabled(lm) }.onFailure {
-            Diag.add("bt", "定位状态读取失败 ${it.javaClass.simpleName}: ${it.message}")
+            Diag.fail("sys", "定位状态读取失败 ${it.javaClass.simpleName}: ${it.message}")
         }.getOrNull()
     }
 
     /** 业务分支要确定的布尔：读不到按关闭处理，但要留一条日志。 */
     fun locationEnabled(): Boolean {
         val state = locationEnabledOrNull()
-        if (state == null) Diag.add("bt", "定位状态读取失败，按关闭处理")
+        if (state == null) Diag.fail("sys", "定位状态读取失败，按关闭处理")
         return state ?: false
     }
 
@@ -75,7 +75,7 @@ class MainActivity : ComponentActivity() {
         ActivityResultContracts.RequestMultiplePermissions(),
     ) { granted ->
         // 有的 ROM 会回一个空的 map，values.all{} 对空 map 恒为 true，必须按 key 查
-        Diag.add("bt", "权限回调 ${granted.entries.joinToString { "${it.key.substringAfterLast('.')}=${it.value}" }}")
+        Diag.add("sys", "权限回调 ${granted.entries.joinToString { "${it.key.substringAfterLast('.')}=${it.value}" }}")
         if (btPermissions.all { granted[it] == true }) {
             val action = pendingAction ?: { bridge.scanInternal() }
             pendingAction = null
@@ -116,7 +116,7 @@ class MainActivity : ComponentActivity() {
                 // 页面自己的事件走 diagLog 落盘；这里只补收 console 里的错误，避免一条记两次
                 if (msg.messageLevel() != ConsoleMessage.MessageLevel.ERROR) return true
                 lastJsError = "${msg.message()} (:${msg.lineNumber()})"
-                Diag.add("web", "页面报错 $lastJsError @${msg.sourceId()}")
+                Diag.fail("web", "页面报错 $lastJsError @${msg.sourceId()}")
                 return true
             }
         }
@@ -132,7 +132,7 @@ class MainActivity : ComponentActivity() {
                 request: WebResourceRequest,
                 error: WebResourceErrorCompat,
             ) {
-                Diag.add("web", "page error ${error.errorCode} ${error.description} for ${request.url}")
+                Diag.fail("web", "page error ${error.errorCode} ${error.description} for ${request.url}")
                 if (request.isForMainFrame) {
                     showBanner("页面没加载出来：${error.errorCode} ${error.description}")
                 }
@@ -143,7 +143,7 @@ class MainActivity : ComponentActivity() {
                 view.evaluateJavascript("window.__boseApp === true") { value ->
                     if (value != "true") {
                         val tail = if (lastJsError.isEmpty()) "" else "（$lastJsError）"
-                        Diag.add("web", "页面脚本没跑起来$tail")
+                        Diag.fail("web", "页面脚本没跑起来$tail")
                         showBanner("页面脚本没跑起来$tail")
                     }
                 }

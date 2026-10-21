@@ -176,7 +176,10 @@ class BmapBridge(
             runCatching {
                 mgr.getConnectedDevices(profile).orEmpty().forEach { out.add((it.address ?: "").lowercase()) }
             }.onFailure {
-                Diag.add("bt", "getConnectedDevices($profile) 失败 ${it.javaClass.simpleName}: ${it.message}")
+                Diag.fail(
+                    "hub", "getConnectedDevices($profile) 失败 ${it.javaClass.simpleName}: ${it.message}",
+                    stage = if (it is SecurityException) "B" else "C",
+                )
             }
         }
         return out
@@ -194,7 +197,7 @@ class BmapBridge(
 
     @JavascriptInterface
     fun bleDisconnect(token: String) {
-        log("js bleDisconnect token=$token")
+        log("js bleDisconnect token=$token", "D")
         main.post {
             if (token == session) {
                 close()
@@ -208,7 +211,7 @@ class BmapBridge(
      * 还开着，同一台耳机的每条回包会被两个页面各记一遍，诊断里就是两条 session 在抢。
      */
     fun release() {
-        Diag.add("bt", "release 桥 session=$session gatt=${gatt != null} spp=${spp != null}")
+        Diag.add("life", "release 桥 session=$session gatt=${gatt != null} spp=${spp != null}")
         session = ""
         close()
     }
@@ -323,7 +326,7 @@ class BmapBridge(
             }.getOrElse { "${it.javaClass.simpleName}: ${it.message}" }
 
             if (reason != null) {
-                Diag.add("diag", "导出失败（$origin）：$reason")
+                Diag.fail("diag", "导出失败（$origin）：$reason")
                 runCatching { file?.takeIf { it.exists() }?.delete() }
                 notifyExport(origin, ok = false, file = null, shareError = null, error = reason)
                 return@post
@@ -343,7 +346,7 @@ class BmapBridge(
 
             if (shareError != null) {
                 // 文件已经写好，保留；只报告分享失败
-                Diag.add("diag", "分享失败（$origin）：$shareError；文件保留 ${target.absolutePath}")
+                Diag.fail("diag", "分享失败（$origin）：$shareError；文件保留 ${target.absolutePath}")
             }
             notifyExport(origin, ok = true, file = target, shareError = shareError, error = null)
         }
@@ -373,7 +376,7 @@ class BmapBridge(
     }
 
     fun scanInternal() {
-        log("scan transport=${wantTransport ?: "-"} address=${wantAddress ?: "-"} channels=$wantChannels services=${wantServices.size}")
+        log("scan transport=${wantTransport ?: "-"} address=${wantAddress ?: "-"} channels=$wantChannels services=${wantServices.size}", "D")
         val ad = adapter ?: return fail("adapter")
         if (!ad.isEnabled) return fail("off")
         close()
@@ -389,7 +392,7 @@ class BmapBridge(
         val already = mgr?.getConnectedDevices(BluetoothProfile.GATT).orEmpty()
             .firstOrNull { if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "") }
         if (already != null) {
-            log("gatt already connected: ${already.name}")
+            log("gatt already connected: ${already.name}", "D")
             connectGatt(already, mine)
             return
         }
@@ -398,10 +401,10 @@ class BmapBridge(
             // 页面明确要了 transport（这里是 ble）且有地址：直接连这台设备的 GATT。
             // 以前这里无条件改道 SPP，结果连到的是别的 RFCOMM 通道，回来的不是 BMAP，
             // 每条请求都超时，界面报「设备不支持」。
-            log("known target, open gatt directly address=$wantAddress")
+            log("known target, open gatt directly address=$wantAddress", "D")
             runCatching { connectGatt(ad.getRemoteDevice(wantAddress), mine) }
                 .onFailure {
-                    log("getRemoteDevice/connectGatt 失败 ${it.message}，按 GATT 失败处理")
+                    Diag.fail("ble", "getRemoteDevice/connectGatt 失败 ${it.message}，按 GATT 失败处理", stage = "D")
                     fallback(mine)
                 }
             return
@@ -426,7 +429,7 @@ class BmapBridge(
                 val name = result.scanRecord?.deviceName ?: device.name ?: return
                 if (wantAddress != null && !device.address.equals(wantAddress, ignoreCase = true)) return
                 if (wantAddress == null && !isBose(name)) return
-                log("found $name")
+                log("found $name", "D")
                 seen[device.address] = device
                 settle()
                 connectGatt(device, mine)
@@ -434,14 +437,14 @@ class BmapBridge(
 
             override fun onScanFailed(errorCode: Int) {
                 if (mine != gen) return
-                log("scan failed $errorCode")
+                Diag.fail("ble", "scan failed $errorCode", stage = "D")
                 settle()
                 fail(if (!activity.locationEnabled()) "location" else "scan")
             }
         }
         scanCallback = cb
         runCatching { scanner.startScan(cb) }.onFailure {
-            log("startScan threw ${it.message}")
+            Diag.fail("ble", "startScan threw ${it.message}", stage = "D")
             settle()
             return fail("scan")
         }
@@ -453,7 +456,7 @@ class BmapBridge(
             when {
                 seen.isNotEmpty() -> connectGatt(seen.values.first(), mine)
                 bonded != null -> {
-                    log("scan timeout, try bonded ${bonded.name}")
+                    log("scan timeout, try bonded ${bonded.name}", "D")
                     connectGatt(bonded, mine)
                 }
                 else -> trySpp(ad, mine)
@@ -469,7 +472,7 @@ class BmapBridge(
         var ready = false
         main.postDelayed({
             if (mine == gen && !ready && gatt != null) {
-                log("connect timeout")
+                Diag.fail("ble", "connect 后 15 秒没 ready", stage = "D")
                 fallback(mine)
             }
         }, 15000)
@@ -485,12 +488,12 @@ class BmapBridge(
                     return
                 }
                 if (newState == BluetoothProfile.STATE_CONNECTED) {
-                    log("gatt connected status=$status")
+                    log("gatt connected status=$status", "D")
                     if (!g.requestMtu(517)) discover(g)
                     // 有的机型 requestMtu 不回调 onMtuChanged，兜一个超时直接发现服务
                     main.postDelayed({ if (mine == gen) discover(g) }, 1500)
                 } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
-                    log("gatt disconnected status=$status")
+                    log("gatt disconnected status=$status", "D")
                     if (status == BluetoothGatt.GATT_SUCCESS) {
                         event("onNativeDisconnected", mine)
                     } else {
@@ -501,14 +504,14 @@ class BmapBridge(
 
             override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
                 if (mine != gen || g !== gatt) return
-                log("mtu=$mtu status=$status")
+                log("mtu=$mtu status=$status", "E")
                 discover(g)
             }
 
             override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
                 if (mine != gen || g !== gatt) return
                 if (status != BluetoothGatt.GATT_SUCCESS) {
-                    Diag.add("bt", "discoverServices 失败 status=$status（session=$session）")
+                    Diag.fail("ble", "discoverServices 失败 status=$status（session=$session）", attemptId = session)
                     return fail("service", mine)
                 }
                 val svc = g.getService(SVC_APK) ?: g.getService(SVC_SIG) ?: return fail("service")
@@ -533,7 +536,7 @@ class BmapBridge(
                     g.writeDescriptor(cccd)
                 }
                 if (!ok) {
-                    Diag.add("bt", "cccd 写入调用失败 uuid=${ch.uuid} props=${ch.properties}")
+                    Diag.fail("ble", "cccd 写入调用失败 uuid=${ch.uuid} props=${ch.properties}", attemptId = session)
                     fail("notify")
                 }
             }
@@ -541,7 +544,7 @@ class BmapBridge(
             override fun onDescriptorWrite(g: BluetoothGatt, descriptor: BluetoothGattDescriptor, status: Int) {
                 if (mine != gen || g !== gatt) return
                 if (descriptor.uuid != CCCD) return
-                log("cccd write status=$status")
+                log("cccd write status=$status", "E")
                 if (status != BluetoothGatt.GATT_SUCCESS) return fail("notify")
                 ready = true
                 connected(device.name ?: "Bose", "ble", mine)
@@ -565,7 +568,7 @@ class BmapBridge(
                     if (mine != gen || g !== gatt) return@post
                     writingGatt = false
                     if (status != BluetoothGatt.GATT_SUCCESS) {
-                        log("gatt write 失败 status=$status（session=$session）")
+                        Diag.fail("ble", "gatt write 失败 status=$status（session=$session）", attemptId = session)
                         gattWrites.clear()
                         fail("write", mine)
                     } else flushGatt()
@@ -574,7 +577,7 @@ class BmapBridge(
         }
         gatt = runCatching {
             device.connectGatt(activity, false, cb, BluetoothDevice.TRANSPORT_LE, BluetoothDevice.PHY_LE_1M_MASK, main)
-        }.onFailure { log("connectGatt threw ${it.message}") }.getOrNull()
+        }.onFailure { Diag.fail("ble", "connectGatt threw ${it.message}", stage = "D") }.getOrNull()
         if (gatt == null) fail("connect")
     }
 
@@ -590,9 +593,9 @@ class BmapBridge(
                     if (mine != gen) return@execute
                     socket.outputStream.write(bytes)
                     socket.outputStream.flush()
-                    log("spp write ${bytes.size}B")
+                    log("spp write ${bytes.size}B", "F")
                 } catch (error: Exception) {
-                    Diag.add("bt", "spp write 失败 ${error.message}")
+                    Diag.fail("spp", "spp write 失败 ${error.message}", attemptId = session)
                     fail("write", mine)
                 }
             }
@@ -613,6 +616,7 @@ class BmapBridge(
         } else {
             BluetoothGattCharacteristic.WRITE_TYPE_DEFAULT
         }
+        log("gatt tx ${bytes.size}B", "E")
         val ok = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             g.writeCharacteristic(ch, bytes, type) == BluetoothStatusCodes.SUCCESS
         } else {
@@ -641,7 +645,7 @@ class BmapBridge(
         if (!sppTried && ad != null && ad.bondedDevices?.any {
             if (wantAddress != null) it.address.equals(wantAddress, ignoreCase = true) else isBose(it.name ?: "")
         } == true) {
-            log("gatt unusable, fall back to rfcomm address=${wantAddress ?: "-"} services=${wantServices.size} channels=$wantChannels")
+            log("gatt unusable, fall back to rfcomm address=${wantAddress ?: "-"} services=${wantServices.size} channels=$wantChannels", "D")
             val target = wantAddress
             if (target != null) openSpp(ad, target, mine) else trySpp(ad, mine)
         } else {
@@ -667,12 +671,12 @@ class BmapBridge(
                     sockets.add(sock)
                 }
             }
-            log("spp 候选 ${sockets.size} 个（服务 ${services.size} / 端口 ${channels.joinToString(",")}）")
+            log("spp 候选 ${sockets.size} 个（服务 ${services.size} / 端口 ${channels.joinToString(",")}）", "F")
             for (sock in sockets) {
                 try {
                     if (!trackOpening(sock, mine)) { sock.close(); return@Thread }
                     sock.connect()
-                    log("spp connected ${sock.remoteDevice.address}")
+                    log("spp connected ${sock.remoteDevice.address}", "F")
                     synchronized(this) { if (openingSocket === sock) openingSocket = null }
                     if (mine != gen) {
                         runCatching { sock.close() }
@@ -687,7 +691,7 @@ class BmapBridge(
                     }
                     return@Thread
                 } catch (error: Exception) {
-                    log("spp 端口失败 ${error.message}")
+                    Diag.fail("spp", "spp 端口失败 ${error.message}", attemptId = session)
                     runCatching { sock.close() }
                 }
             }
@@ -720,7 +724,7 @@ class BmapBridge(
             } catch (error: Exception) {
                 main.post {
                     if (mine != gen) return@post
-                    log("rfcomm failed ${error.message}, try target gatt")
+                    log("rfcomm failed ${error.message}, try target gatt", "D")
                     runCatching { openingSocket?.close() }
                     openingSocket = null
                     connectGatt(bonded, mine)
@@ -735,11 +739,11 @@ class BmapBridge(
             while (true) {
                 val n = sock.inputStream.read(buf)
                 if (n <= 0) break
-                log("spp read ${n}B")
+                log("spp read ${n}B", "F")
                 event("onDataReceived", mine, bytesToHex(buf.copyOf(n)))
             }
         } catch (error: Exception) {
-            log("spp read 中断 ${error.message}")
+            Diag.fail("spp", "spp read 中断 ${error.message}", attemptId = session)
         }
         event("onNativeDisconnected", mine)
     }
@@ -795,8 +799,13 @@ class BmapBridge(
         main.post { runCatching { web.evaluateJavascript(code, null) } }
     }
 
-    private fun log(line: String) {
-        Diag.add("bt", line)
+    // 阶段划分（跟 AGENTS 的故障矩阵对齐）：
+    //   D = 这次连接的选择与建立（扫描、选设备、connect、超时、切 transport）
+    //   E = 连上之后的 GATT 配置（服务/特征/MTU/CCCD/订阅/收发）
+    //   F = SPP 通道（RFCOMM 打开、串口读写）
+    //   G = 协议字节收发（默认）
+    private fun log(line: String, stage: String = "G") {
+        Diag.add("bt", line, stage = stage)
     }
 
     companion object {
@@ -875,14 +884,42 @@ object Diag {
         }
     }
 
-    fun add(scope: String, message: String) {
+    // stage 是故障矩阵里的阶段（A 启动与网页 … I 日志自身），导出靠它一眼看出卡在哪一步；
+    // scope 只是给人看的短标签。调用点知道得更准就显式传，只给 scope 时按这张表兜底。
+    private val STAGE_BY_SCOPE = mapOf(
+        "web" to "A", "sys" to "B", "hub" to "C", "ble" to "E",
+        "spp" to "F", "life" to "H", "diag" to "I",
+    )
+
+    /** 信息行。attemptId 传当前连接 session，导出里能把原生这几步接到同一次会话上。 */
+    fun add(scope: String, message: String, stage: String? = null, attemptId: String? = null) {
         Log.d(TAG, "$scope $message")
+        remember("$scope $message")
+        append(event(scope, message, stage, attemptId, "info"))
+    }
+
+    /** 失败行：level=error，跟页面侧失败一个量级，导出里筛得出来。 */
+    fun fail(scope: String, message: String, stage: String? = null, attemptId: String? = null) {
+        Log.e(TAG, "$scope $message")
+        remember("$scope $message")
+        append(event(scope, message, stage, attemptId, "error"))
+    }
+
+    private fun event(scope: String, message: String, stage: String?, attemptId: String?, level: String) =
+        mapOf(
+            "source" to "native",
+            "stage" to (stage ?: STAGE_BY_SCOPE[scope] ?: "G"),
+            "event" to scope,
+            "level" to level,
+            "detail" to message,
+            "attemptId" to attemptId,
+        )
+
+    private fun remember(line: String) {
         synchronized(memoryLock) {
             if (memory.size >= MAX_MEMORY) memory.removeFirst()
-            memory.addLast("$scope $message")
+            memory.addLast(line)
         }
-        append(mapOf("source" to "native", "stage" to "G", "event" to scope,
-            "level" to "info", "detail" to message))
     }
 
     /** 页面把结构化事件送进来（JSON 字符串） */
@@ -977,6 +1014,7 @@ object Diag {
         if (out == null) {
             writeFailures++
             health = "write-failed: no stream"
+            remember(line.trim())
             return
         }
         runCatching {
@@ -987,6 +1025,8 @@ object Diag {
         }.onFailure { e ->
             writeFailures++
             health = "write-failed: ${e.javaClass.simpleName}: ${e.message}"
+            // 落不了盘的行留在内存里，导出时跟着 health=write-failed 一起出现，别整条丢
+            remember(line.trim())
             Log.e(TAG, "日志写盘失败 ${e.message}")
         }
     }
