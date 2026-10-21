@@ -2,16 +2,16 @@ import { getLang } from "./labels.js";
 
 export const LINK_TEXT = {
   idle: { zh: "请先连接耳机", en: "Connect headphones first" },
-  busy: { zh: "正在找耳机", en: "Looking for headphones" },
-  off: { zh: "需要先开启蓝牙", en: "Turn on Bluetooth first" },
-  denied: { zh: "需要蓝牙权限", en: "Bluetooth permission needed" },
-  unsupported: { zh: "这边连不了蓝牙", en: "Bluetooth unavailable here" },
-  notfound: { zh: "没找到耳机，再试一次", en: "No headphones, try again" },
-  refused: { zh: "耳机被别的设备连着", en: "Connected to another device" },
+  busy: { zh: "正在搜索耳机", en: "Searching for headphones" },
+  off: { zh: "请开启蓝牙", en: "Turn on Bluetooth" },
+  denied: { zh: "需要蓝牙权限", en: "Bluetooth permission required" },
+  unsupported: { zh: "不支持蓝牙", en: "Bluetooth unsupported" },
+  notfound: { zh: "未找到耳机，请重试", en: "Headphones not found, retry" },
+  refused: { zh: "耳机已被占用", en: "In use by another device" },
   noproto: { zh: "设备不支持", en: "Device not supported" },
-  failed: { zh: "没连上，再试一次", en: "Not connected, try again" },
-  lost: { zh: "请重新连接", en: "Reconnect please" },
-  location: { zh: "需要开启定位服务", en: "Turn on location" },
+  failed: { zh: "连接失败，请重试", en: "Connection failed, retry" },
+  lost: { zh: "连接已断开，请重连", en: "Please reconnect" },
+  location: { zh: "请开启定位服务", en: "Enable location services" },
 };
 
 const LINK_BY_CODE = {
