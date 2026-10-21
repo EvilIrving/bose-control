@@ -26,3 +26,6 @@ __pycache__/
 
 # local bluetooth bridge binary
 tools/bt-bridge
+
+# BLE 枚举小工具（源码 tools/ble-dump.swift）
+tools/ble-dump
