@@ -22,6 +22,7 @@
       document.addEventListener("contextmenu", (e) => e.preventDefault());
       (function () {
         var chrome = (navigator.userAgent.match(/Chrome\/(\d+)/) || [])[1] || "?";
+        var isZh = String(navigator.language || "").toLowerCase().startsWith("zh");
         function hint(text) {
           var paint = function () {
             document.body.classList.add("idle");
@@ -33,14 +34,14 @@
         }
         // 老 WebView 不支持 type="module"，app.js 根本不会执行，这里直接说清楚
         if (!("noModule" in HTMLScriptElement.prototype)) {
-          hint("系统 WebView 太旧，请升级（Chromium " + chrome + "）");
+          hint(isZh ? "内核版本过低，请升级（Chromium " + chrome + "）" : "WebView outdated, please update (Chromium " + chrome + ")");
           return;
         }
         // app.js 用了可选链等新语法，Chromium 80 以下会在解析阶段就挂掉
         try {
           new Function("return a?.b ?? c");
         } catch (err) {
-          hint("系统 WebView 太旧，请升级（Chromium " + chrome + "）");
+          hint(isZh ? "内核版本过低，请升级（Chromium " + chrome + "）" : "WebView outdated, please update (Chromium " + chrome + ")");
           return;
         }
         document.addEventListener(
@@ -49,7 +50,7 @@
             if (window.__boseApp) return;
             var go = e.target && e.target.closest && e.target.closest("#go");
             if (!go) return;
-            hint("页面脚本没加载起来（Chromium " + chrome + "）");
+            hint(isZh ? "页面加载失败，请重试（Chromium " + chrome + "）" : "Page failed to load, retry (Chromium " + chrome + ")");
             window.NativeBLE && window.NativeBLE.bleScan();
           },
           true,
