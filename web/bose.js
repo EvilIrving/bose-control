@@ -429,12 +429,13 @@ function renderShortcut() {
     ? `${t("shortcut")} · ${pressName(config.eventType)}`
     : t("shortcut");
   if (!config || !config.supported.length) return;
-  // #shortcut 装的是「组」（华为往里放手势组），chip 行自己建才吃得到 .chips 的横向滚动。
-  // 每次清干净：不清就会捡到上一个品牌留下的 .chips，把按钮画进手势组里
-  const row = document.createElement("div");
+  // #shortcut 装的是「组」（华为往里放手势组），chip 行得自己建才吃得到 .chips 的横向滚动。
+  // 行要复用：重建会连「上一轮选中值」和用户滑到的位置一起丢掉。
+  // 只摘别家的残留，不搬自己：replaceChildren 会把自己也先摘下来，scrollLeft 跟着归零
+  const row = ui.shortcut.querySelector(":scope > .chips") ?? document.createElement("div");
   row.className = "chips";
-  ui.shortcut.innerHTML = "";
-  ui.shortcut.appendChild(row);
+  for (const child of [...ui.shortcut.children]) if (child !== row) child.remove();
+  if (row.parentElement !== ui.shortcut) ui.shortcut.append(row);
   chips(
     row,
     config.supported.map((id) => ({ key: id, label: actionName(id) })),
