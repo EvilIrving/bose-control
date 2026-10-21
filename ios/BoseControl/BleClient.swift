@@ -89,6 +89,10 @@ enum Diag {
         publish(source: "native", stage: stage, event: text, level: "error", attemptId: attemptId)
     }
 
+    // 传输层自己的阶段：BLE 是 E（BLE 配置）。BleClient 一律走 ble*，调用点不用每条都写 stage。
+    static func ble(_ text: String, attemptId: String? = nil) { log(text, stage: "E", attemptId: attemptId) }
+    static func bleFail(_ text: String, attemptId: String? = nil) { fail(text, stage: "E", attemptId: attemptId) }
+
     static func pageEvent(_ json: String) {
         guard let data = json.data(using: .utf8),
               var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
@@ -296,7 +300,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func scanAndConnect() {
-        Diag.log("scanAndConnect state=\(central.state.rawValue)")
+        Diag.log("scanAndConnect state=\(central.state.rawValue)", stage: "B")
         if central.state == .unknown {
             wantScan = true
             return
@@ -310,10 +314,10 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func send(hex: String) {
         guard let ch = writeChar else {
-            Diag.fail("send 时还没有写通道")
+            Diag.bleFail("send 时还没有写通道")
             return
         }
-        Diag.log("write \(hex.count / 2)B")
+        Diag.ble("write \(hex.count / 2)B")
         writeQueue.append((hexToData(hex), ch))
         flushWrites()
     }
@@ -352,7 +356,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     func peripheral(_ peripheral: CBPeripheral, didWriteValueFor characteristic: CBCharacteristic, error: Error?) {
-        if let error { Diag.fail("写失败 \(error.localizedDescription)") }
+        if let error { Diag.bleFail("写失败 \(error.localizedDescription)") }
         guard peripheral === target else { return }
         writing = false
         if error != nil {
@@ -383,7 +387,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     }
 
     private func startScan() {
-        Diag.log("scan start（\(Int(scanSeconds))s）")
+        Diag.ble("scan start（\(Int(scanSeconds))s）")
         reset()
         found.removeAll()
         wantScan = false
@@ -421,12 +425,12 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
             connect(ready)
             return
         }
-        Diag.fail("scan 扫完没有候选（看到 \(found.count) 台）")
+        Diag.bleFail("scan 扫完没有候选（看到 \(found.count) 台）")
         delegate?.bleDidFail("none")
     }
 
     private func connect(_ peripheral: CBPeripheral) {
-        Diag.log("connect \(peripheral.name ?? peripheral.identifier.uuidString)")
+        Diag.ble("connect \(peripheral.name ?? peripheral.identifier.uuidString)")
         reset()
         target = peripheral
         peripheral.delegate = self
@@ -488,7 +492,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func centralManagerDidUpdateState(_ central: CBCentralManager) {
         Diag.centralState = stateCode
-        Diag.log("central state=\(stateCode)")
+        Diag.log("central state=\(stateCode)", stage: "B")
         guard wantScan else { return }
         if central.state == .poweredOn {
             startScan()
@@ -523,20 +527,20 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func centralManager(_ central: CBCentralManager, didConnect peripheral: CBPeripheral) {
         guard peripheral === target else { return }
-        Diag.log("gatt connected \(peripheral.name ?? "-")")
+        Diag.ble("gatt connected \(peripheral.name ?? "-")")
         peripheral.discoverServices([svcApk, svcSig])
     }
 
     func centralManager(_ central: CBCentralManager, didFailToConnect peripheral: CBPeripheral, error: Error?) {
         guard peripheral === target else { return }
-        Diag.fail("connect 失败 \(error?.localizedDescription ?? "-")")
+        Diag.bleFail("connect 失败 \(error?.localizedDescription ?? "-")")
         reset()
         delegate?.bleDidFail("refused")
     }
 
     func centralManager(_ central: CBCentralManager, didDisconnectPeripheral peripheral: CBPeripheral, error: Error?) {
         guard peripheral === target else { return }
-        Diag.log("disconnected reported=\(reported) err=\(error?.localizedDescription ?? "-")")
+        Diag.ble("disconnected reported=\(reported) err=\(error?.localizedDescription ?? "-")")
         let wasConnected = reported
         reset()
         if wasConnected {
@@ -548,9 +552,9 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
 
     func peripheral(_ peripheral: CBPeripheral, didDiscoverServices error: Error?) {
         guard peripheral === target else { return }
-        if let error { Diag.fail("discoverServices 失败 \(error.localizedDescription)") }
+        if let error { Diag.bleFail("discoverServices 失败 \(error.localizedDescription)") }
         guard let svc = (peripheral.services ?? []).first(where: { isFebe($0.uuid) }) else {
-            Diag.fail("没有 FEBE 服务（\(peripheral.services?.count ?? 0) 个服务）")
+            Diag.bleFail("没有 FEBE 服务（\(peripheral.services?.count ?? 0) 个服务）")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("service")
@@ -565,20 +569,20 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         error: Error?
     ) {
         guard peripheral === target else { return }
-        if let error { Diag.fail("discoverCharacteristics 失败 \(error.localizedDescription)") }
+        if let error { Diag.bleFail("discoverCharacteristics 失败 \(error.localizedDescription)") }
         let chars = service.characteristics ?? []
         let ch = chars.first { $0.uuid == charSecure }
             ?? chars.first { $0.uuid == charPlain }
             ?? chars.first { $0.properties.contains(.notify) && $0.properties.contains(.write) }
         guard let ch else {
-            Diag.fail("没有可写的控制特征（\(chars.count) 个）")
+            Diag.bleFail("没有可写的控制特征（\(chars.count) 个）")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("char")
             return
         }
         writeChar = ch
-        Diag.log("notify on \(ch.uuid.uuidString)")
+        Diag.ble("notify on \(ch.uuid.uuidString)")
         peripheral.setNotifyValue(true, for: ch)
     }
 
@@ -589,7 +593,7 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
     ) {
         guard peripheral === target, characteristic.uuid == writeChar?.uuid else { return }
         if error != nil || !characteristic.isNotifying {
-            Diag.fail("notify 失败 \(error?.localizedDescription ?? "not notifying")")
+            Diag.bleFail("notify 失败 \(error?.localizedDescription ?? "not notifying")")
             central.cancelPeripheralConnection(peripheral)
             reset()
             delegate?.bleDidFail("notify")
@@ -603,11 +607,11 @@ final class BleClient: NSObject, CBCentralManagerDelegate, CBPeripheralDelegate 
         didUpdateValueFor characteristic: CBCharacteristic,
         error: Error?
     ) {
-        if let error { Diag.fail("读取失败 \(error.localizedDescription)") }
+        if let error { Diag.bleFail("读取失败 \(error.localizedDescription)") }
         guard peripheral === target, characteristic.uuid == writeChar?.uuid, let data = characteristic.value, !data.isEmpty else {
             return
         }
-        Diag.log("read \(data.count)B")
+        Diag.ble("read \(data.count)B")
         delegate?.bleDidReceive(data.map { String(format: "%02x", $0) }.joined())
     }
 }

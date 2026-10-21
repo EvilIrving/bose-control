@@ -39,7 +39,7 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
         allowBle = transport != "spp"
         if transport == "spp" || (address != nil && rfcomm.hasPairedDevice) {
             triedRfcomm = true
-            Diag.log("known target，直接走 rfcomm")
+            Diag.log("known target，直接走 rfcomm", stage: "D")
             rfcomm.connect()
         } else {
             triedBle = true
@@ -65,7 +65,7 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
     func bleDidConnect(name: String) {
         reported = true
         link = "ble"
-        Diag.log("ble connected \(name)")
+        Diag.log("ble connected \(name)", stage: "D")
         delegate?.bmapDidConnect(name: name, link: "ble")
     }
 
@@ -73,11 +73,11 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
         guard !reported else { return }
         if !triedRfcomm && rfcomm.hasPairedDevice {
             triedRfcomm = true
-            Diag.fail("ble 失败（\(message)），改试 rfcomm")
+            Diag.fail("ble 失败（\(message)），改试 rfcomm", stage: "D")
             rfcomm.connect()
             return
         }
-        Diag.fail("ble 失败（\(message)），也没有已配对设备")
+        Diag.fail("ble 失败（\(message)），也没有已配对设备", stage: "D")
         delegate?.bmapDidFail(message)
     }
 
@@ -94,13 +94,13 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
     func rfcommDidConnect(name: String) {
         reported = true
         link = "spp"
-        Diag.log("rfcomm connected \(name)")
+        Diag.log("rfcomm connected \(name)", stage: "D")
         delegate?.bmapDidConnect(name: name, link: "spp")
     }
 
     func rfcommDidFail(_ message: String) {
         guard !reported else { return }
-        Diag.fail("rfcomm 失败：\(message)")
+        Diag.fail("rfcomm 失败：\(message)", stage: "F")
         if allowBle && !triedBle {
             triedBle = true
             ble.scanAndConnect()

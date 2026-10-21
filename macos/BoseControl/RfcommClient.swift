@@ -37,14 +37,14 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
     func connect() {
         disconnect()
         guard let device = preferredDevice() else {
-            Diag.fail("rfcomm target=\(target ?? "-") 不在已配对列表里（\(paired().count) 台）")
+            Diag.fail("rfcomm target=\(target ?? "-") 不在已配对列表里（\(paired().count) 台）", stage: "C")
             delegate?.rfcommDidFail("没找到耳机：先在系统设置里配对蓝牙设备")
             return
         }
         self.device = device
         opening = true
         reported = false
-        Diag.log("rfcomm device \(device.name ?? "-") \(device.addressString ?? "-") connected=\(device.isConnected())")
+        Diag.spp("rfcomm device \(device.name ?? "-") \(device.addressString ?? "-") connected=\(device.isConnected())")
         if device.isConnected() {
             startChannelAttempts()
             return
@@ -52,7 +52,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         let status = device.openConnection(self)
         if status != kIOReturnSuccess {
             opening = false
-            Diag.fail("rfcomm openConnection \(Diag.code(status))")
+            Diag.sppFail("rfcomm openConnection \(Diag.code(status))")
             delegate?.rfcommDidFail("连接耳机失败")
             return
         }
@@ -63,7 +63,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
                 return
             }
             self.opening = false
-            Diag.fail("rfcomm 8 秒没连上（classic 链路）")
+            Diag.sppFail("rfcomm 8 秒没连上（classic 链路）")
             self.delegate?.rfcommDidFail("连接耳机超时，请重试")
         }
         openTimer = work
@@ -80,7 +80,10 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             return channel.writeSync(ptr, length: n)
         }
         if status != kIOReturnSuccess {
-            Diag.fail("rfcomm 写 \(data.count)B 失败 \(Diag.code(status))")
+            Diag.sppFail("rfcomm 写 \(data.count)B 失败 \(Diag.code(status))")
+        } else {
+            // 发出方向也要留证据：只记失败的话，导出里永远只有 rx 没有 tx，分包对不对看不出来
+            Diag.sppDebug("rfcomm tx \(data.count)B \(HexBytes.hex(data))")
         }
     }
 
@@ -103,7 +106,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             guard let self, self.opening else { return }
             if status != kIOReturnSuccess {
                 self.opening = false
-                Diag.fail("rfcomm connectionComplete \(Diag.code(status))")
+                Diag.sppFail("rfcomm connectionComplete \(Diag.code(status))")
                 self.delegate?.rfcommDidFail("连接耳机失败")
                 return
             }
@@ -120,11 +123,11 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
                 self.opening = false
                 self.openTimer?.cancel()
                 self.openTimer = nil
-                Diag.log("rfcomm channel \(rfcommChannel.getID()) open")
+                Diag.spp("rfcomm channel \(rfcommChannel.getID()) open")
                 self.delegate?.rfcommDidConnect(name: self.device?.name ?? "Bose")
                 return
             }
-            Diag.fail("rfcomm channel \(rfcommChannel.getID()) open \(Diag.code(error))")
+            Diag.sppFail("rfcomm channel \(rfcommChannel.getID()) open \(Diag.code(error))")
             rfcommChannel?.close()
             self.openNextChannel()
         }
@@ -137,7 +140,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
             self.channel = nil
             self.reported = false
             self.opening = false
-            Diag.log("rfcomm channel closed (wasConnected=\(was))")
+            Diag.spp("rfcomm channel closed (wasConnected=\(was))")
             if was { self.delegate?.rfcommDidDisconnect() }
         }
     }
@@ -149,7 +152,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
     ) {
         guard rfcommChannel === channel, dataLength > 0, let dataPointer else { return }
         let hex = HexBytes.hex(Data(bytes: dataPointer, count: dataLength))
-        Diag.debug("rfcomm rx \(dataLength)B \(hex)")
+        Diag.sppDebug("rfcomm rx \(dataLength)B \(hex)")
         DispatchQueue.main.async { [weak self] in
             self?.delegate?.rfcommDidReceive(hex)
         }
@@ -160,12 +163,12 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         openTimer = nil
         guard let device else {
             opening = false
-            Diag.fail("rfcomm 没有设备对象，放弃")
+            Diag.sppFail("rfcomm 没有设备对象，放弃")
             delegate?.rfcommDidFail("没找到耳机")
             return
         }
         channelQueue = channelCandidates(device)
-        Diag.log("rfcomm 候选通道 \(channelQueue)")
+        Diag.spp("rfcomm 候选通道 \(channelQueue)")
         openNextChannel()
     }
 
@@ -230,17 +233,17 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         guard let device, opening, let chID = channelQueue.first else {
             opening = false
             if !reported {
-                Diag.fail("rfcomm 候选通道都开不了")
+                Diag.sppFail("rfcomm 候选通道都开不了")
                 delegate?.rfcommDidFail("耳机没有开放控制通道")
             }
             return
         }
         channelQueue.removeFirst()
-        Diag.log("rfcomm open channel \(chID)")
+        Diag.spp("rfcomm open channel \(chID)")
         var ch: IOBluetoothRFCOMMChannel?
         let status = device.openRFCOMMChannelAsync(&ch, withChannelID: chID, delegate: self)
         if status != kIOReturnSuccess {
-            Diag.fail("rfcomm open channel \(chID) 立即失败 \(Diag.code(status))")
+            Diag.sppFail("rfcomm open channel \(chID) 立即失败 \(Diag.code(status))")
             openNextChannel()
             return
         }
@@ -248,7 +251,7 @@ final class RfcommClient: NSObject, IOBluetoothRFCOMMChannelDelegate {
         openTimer?.cancel()
         let work = DispatchWorkItem { [weak self] in
             guard let self, self.opening, !self.reported else { return }
-            Diag.log("rfcomm channel \(chID) 3 秒没开成，下一个")
+            Diag.spp("rfcomm channel \(chID) 3 秒没开成，下一个")
             ch?.setDelegate(nil)
             ch?.close()
             self.openNextChannel()
@@ -409,12 +412,21 @@ enum Diag {
         publish(source: "native", stage: stage, event: text, level: "error", attemptId: attemptId)
     }
 
-    static func debug(_ text: String) {
+    static func debug(_ text: String, stage: String = "G") {
         logger.debug("\(text, privacy: .public)")
         remember("D " + text)
         // debug 级别的收发也落盘，否则出问题只有半截证据
-        publish(source: "native", stage: "G", event: text, level: "debug", attemptId: nil)
+        publish(source: "native", stage: stage, event: text, level: "debug", attemptId: nil)
     }
+
+    // 传输层自己的阶段：BLE 是 E（BLE 配置），SPP 是 F。按文件分工，
+    // BleClient 一律走 ble*，RfcommClient 一律走 spp*，调用点不用每条都写 stage。
+    static func ble(_ text: String, attemptId: String? = nil) { log(text, stage: "E", attemptId: attemptId) }
+    static func bleFail(_ text: String, attemptId: String? = nil) { fail(text, stage: "E", attemptId: attemptId) }
+    static func bleDebug(_ text: String) { debug(text, stage: "E") }
+    static func spp(_ text: String, attemptId: String? = nil) { log(text, stage: "F", attemptId: attemptId) }
+    static func sppFail(_ text: String, attemptId: String? = nil) { fail(text, stage: "F", attemptId: attemptId) }
+    static func sppDebug(_ text: String) { debug(text, stage: "F") }
 
     static func code(_ status: IOReturn) -> String {
         String(format: "0x%08x", UInt32(bitPattern: status))

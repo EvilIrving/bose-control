@@ -205,14 +205,14 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        Diag.fail("WebView 进程被系统回收，页面已停止")
+        Diag.fail("WebView 进程被系统回收，页面已停止", stage: "H")
         offerNativeExport(reason: "WebView 进程被回收，页面日志可能已丢失")
     }
 
     // 页面起不来时没有设置页可点：原生日志 + 原生导出入口
     private func reportLoadFailure(_ stage: String, _ error: Error) {
         let ns = error as NSError
-        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)")
+        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)", stage: "A")
         offerNativeExport(reason: "页面加载失败：\(ns.domain)/\(ns.code)")
     }
 
@@ -289,12 +289,12 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
         } catch {
             let ns = error as NSError
             let detail = "\(ns.domain)/\(ns.code): \(ns.localizedDescription)"
-            Diag.fail("导出诊断写入失败：\(detail)")
+            Diag.fail("导出诊断写入失败：\(detail)", stage: "I")
             deliver(.writeFailed(detail: detail), notify: notify)
             return
         }
 
-        Diag.log("导出诊断已写入 \(url.lastPathComponent)（\(full.utf8.count)B）")
+        Diag.log("导出诊断已写入 \(url.lastPathComponent)（\(full.utf8.count)B）", stage: "I")
         let share = UIActivityViewController(activityItems: [url], applicationActivities: nil)
         if let pop = share.popoverPresentationController {
             pop.sourceView = view
@@ -316,7 +316,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
                 // 用户取消：文件留着，不宣称分享成功
                 outcome = .canceled(path: url.path, bytes: full.utf8.count)
             }
-            Diag.log("导出分享结果：\(outcome.summary)")
+            Diag.log("导出分享结果：\(outcome.summary)", stage: "I")
             guard let self else { return }
             self.deliver(outcome, notify: notify)
         }

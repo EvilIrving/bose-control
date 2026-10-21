@@ -237,14 +237,14 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     }
 
     func webViewWebContentProcessDidTerminate(_ webView: WKWebView) {
-        Diag.fail("WebView 进程被系统回收，页面已停止")
+        Diag.fail("WebView 进程被系统回收，页面已停止", stage: "H")
         offerNativeExport(reason: "WebView 进程被回收，页面日志可能已丢失")
     }
 
     // 页面起不来时没有设置页可点：原生日志 + 原生导出入口
     private func reportLoadFailure(_ stage: String, _ error: Error) {
         let ns = error as NSError
-        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)")
+        Diag.fail("页面加载失败 \(stage) \(ns.domain)/\(ns.code) \(ns.localizedDescription)", stage: "A")
         offerNativeExport(reason: "页面加载失败：\(ns.domain)/\(ns.code)")
     }
 
@@ -252,7 +252,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         #if DEBUG
         if selfTestMode {
             // 自检时不弹窗，结果由 scheduleSelfTestIfAsked 写到文件里
-            Diag.log("自检模式：跳过原生导出弹窗（\(reason)）")
+            Diag.log("自检模式：跳过原生导出弹窗（\(reason)）", stage: "I")
             return
         }
         #endif
@@ -288,7 +288,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         let full = Diag.exportTextSync(header: [head, "", "==== 原生 ====", Diag.systemInfo()])
 
         func finish(_ ok: Bool, _ detail: String) {
-            Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)")
+            Diag.log("导出诊断(\(ok ? "成功" : "失败"))：\(detail)", stage: "I")
             if let notify {
                 notify(ok, detail)
             } else {
@@ -311,16 +311,16 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     func userContentController(_ userContentController: WKUserContentController, didReceive message: WKScriptMessage) {
         switch message.name {
         case "bleScan":
-            Diag.log("js bleScan（无参，只能盲扫 BLE）")
+            Diag.log("js bleScan（无参，只能盲扫 BLE）", stage: "D")
             break
         case "bleConnect":
             // 页面统一发 JSON 字符串，Android 的 JS 接口只认字符串，这边跟着一起
             var body: [String: Any] = [:]
             if let text = message.body as? String, let data = text.data(using: .utf8) {
-                Diag.log("js bleConnect \(text)")
+                Diag.log("js bleConnect \(text)", stage: "D")
                 body = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
             } else if let dict = message.body as? [String: Any] {
-                Diag.log("js bleConnect \(dict)")
+                Diag.log("js bleConnect \(dict)", stage: "D")
                 body = dict
             }
             let transport = body["transport"] as? String ?? "ble"
@@ -373,7 +373,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             exportDiagnostics(pageText: text, reason: "", notify: nil)
         case "setBrand":
             if let id = message.body as? String {
-                Diag.log("js setBrand \(id)")
+                Diag.log("js setBrand \(id)", stage: "D")
                 UserDefaults.standard.set(id, forKey: brandKey)
             }
         default:
@@ -435,7 +435,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     private func js(_ code: String) {
         DispatchQueue.main.async {
             self.web.evaluateJavaScript(code) { _, error in
-                if let error { Diag.fail("js error \(error.localizedDescription)") }
+                if let error { Diag.fail("js error \(error.localizedDescription)", stage: "A") }
             }
         }
     }
