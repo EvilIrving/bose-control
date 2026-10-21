@@ -30,15 +30,16 @@ export function reveal(root, el) {
   else if (item.right > box.right) root.scrollLeft += item.right - box.right;
 }
 
-// 选中值真的变了才 reveal。每次重画都 reveal，会把用户正滑着看别的选项的位置拽回当前值；
-// 而响应驱动的 refresh 在刚连上时会有好几次。首次渲染（previous === undefined）仍会 reveal，
-// 所以一进来就看得到当前值。
+// 选中值或内容宽度真的变了才 reveal（切语言时值不变但标签变宽，当前值会被甩出屏）。
+// 没有布局盒（隐藏、还没进文档）就不记账，否则这次「首次 reveal」会被永久吃掉。
+// 键不算 scrollLeft，所以用户滑到哪都不抢。
 const shownSelection = new WeakMap();
 
 export function revealSelection(root, selected) {
-  const previous = shownSelection.get(root);
-  shownSelection.set(root, selected);
-  if (previous === selected) return;
+  if (!root.clientWidth) return;
+  const seen = `${selected}\u0000${root.scrollWidth}`;
+  if (shownSelection.get(root) === seen) return;
+  shownSelection.set(root, seen);
   reveal(root, root.querySelector(".on"));
 }
 
