@@ -1,6 +1,6 @@
 import { ancModeName, eqPresetName, swipeActionName, t, tapActionName, voiceLocaleName } from "./labels.js";
 import { EMPTY, bytes, createParser, decode, encode, keyOf, num, text } from "./spp.js";
-import { chip, chips, pane, refill } from "./ui.js";
+import { chip, chips, pane, refill, reveal } from "./ui.js";
 
 // 华为耳机的控制命令，取值来自 OpenFreebuds 的 SPP 命令表，
 // 每条都在 FreeClip 2 上实际跑通过（见 tests/spp.test.mjs 里的真机回包）。
@@ -109,6 +109,8 @@ export class HuaweiHeadset {
     this.anc = null;
     this.eq = null;
     this.gestures = null;
+    // 手势行的节点缓存：重画复用，别重建（见 gestureRow）
+    this.gestureRows = new Map();
     this.autoPause = null;
     this.lowLatency = null;
     this.canPrefer = null;
@@ -665,9 +667,10 @@ export class HuaweiHeadset {
     const ui = this.ui;
     const g = this.gestures;
     const box = ui.shortcut;
-    box.innerHTML = "";
     ui.shortcutTitle.textContent = t("gestures");
     if (!g) {
+      box.replaceChildren();
+      this.gestureRows.clear();
       pane(box, false);
       return;
     }
@@ -680,7 +683,23 @@ export class HuaweiHeadset {
         this.gestureRow(t("swipe"), this.swipeOptions(g.swipe), g.swipe.value, (code) => this.setSwipe(code), swipeActionName),
       );
     }
-    for (const row of rows) box.appendChild(row);
+    // 复用同一批节点，只摘不用的。重画是响应驱动的，重建或搬动都会让内层 .chips 的 scrollLeft
+    // 归零（append/insertBefore 已经在位的节点也是 move），所以只挪错位的那一行
+    const boxes = rows.map((row) => row.box);
+    const live = new Set(boxes);
+    for (const child of [...box.children]) if (!live.has(child)) child.remove();
+    const moved = [];
+    rows.forEach((row, index) => {
+      if (box.children[index] === row.box) return;
+      moved.push(row);
+      box.insertBefore(row.box, box.children[index] ?? null);
+    });
+    // 对完位再填 chip：新行先挂进文档（gestureRow 干的），reveal 才算得到坐标
+    for (const row of rows) {
+      chips(row.list, row.options.map((code) => ({ key: code, label: row.label(code) })), row.current, row.onPick);
+    }
+    // 被搬过的行 scrollLeft 已经归零，键没变不会自动 reveal，补一次
+    for (const row of moved) reveal(row.list, row.list.querySelector(".on"));
     pane(box, rows.length > 0);
   }
 
@@ -716,20 +735,22 @@ export class HuaweiHeadset {
   }
 
   gestureRow(title, options, current, onPick, label = (code) => String(code)) {
-    const box = document.createElement("div");
+    // 按标题缓存节点：revealSelection 认的是元素，元素不能每条重画都换新的
+    const cached = this.gestureRows.get(title);
+    const box = cached?.box ?? document.createElement("div");
     box.className = "gesture";
-    const head = document.createElement("b");
+    const head = cached?.head ?? document.createElement("b");
     head.textContent = title;
-    const list = document.createElement("div");
+    const list = cached?.list ?? document.createElement("div");
     list.className = "chips";
-    chips(
-      list,
-      options.map((code) => ({ key: code, label: label(code) })),
-      current,
-      onPick,
-    );
-    box.append(head, list);
-    return box;
+    if (!cached) {
+      box.append(head, list);
+      this.gestureRows.set(title, { box, head, list });
+    }
+    // 先进文档再填 chip：游离节点 getBoundingClientRect 全是 0，reveal 算了也没用。
+    // 填 chip 和对位交给 renderGestures（对完位才知道最终坐标）
+    if (box.parentElement !== this.ui.shortcut) this.ui.shortcut.append(box);
+    return { box, list, options, current, onPick, label };
   }
 
   renderVoice() {
