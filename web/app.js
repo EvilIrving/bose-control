@@ -275,8 +275,8 @@ function exportDiag() {
     `页面能力 ${JSON.stringify(platformInfo())} / hub=${nativeHub()} / bridge=${bridgeAvailable()} / brands=${brandsHere().map((b) => b.id).join(",")}`,
     `当前品牌 ${getBrand()} / 页面 ${state.page} / link ${state.link} / busy ${state.busy}`,
     `设备名 ${state.name || link.name || "—"} / 通道 ${link.link} / 错误 ${link.lastError || "—"}`,
-    `配对表 原生给了 ${peerDiag.total} 台，认得 ${peerDiag.matched} 台` +
-      (peerDiag.dropped.length ? `，认不出：${peerDiag.dropped.join(" / ")}` : ""),
+    `配对表 原生给了 ${peerDiag.total} 台，能用 ${peerDiag.matched} 台` +
+      (peerDiag.dropped.length ? `，没显示：${peerDiag.dropped.join(" / ")}` : ""),
     `不支持 ${missingCapabilities().join(" / ") || "无"}`,
     `页面日志 ${logCount()} 行（历史以原生持久文件为准）`,
   ];
@@ -509,9 +509,11 @@ let droppedSig = "";
 let peerDiag = { total: 0, matched: 0, dropped: [] };
 
 // 少一台时最需要知道的是「为什么」，不是「少了几台」
-function exclusionReason(name) {
+function exclusionReason(name, usable) {
   const n = String(name || "").trim();
   if (!n) return "no-name";
+  const brand = brandForName(n);
+  if (brand && !usable.has(brand.id)) return "transport-unavailable";
   return "no-match";
 }
 
@@ -525,18 +527,27 @@ window.onDeviceList = (json) => {
     rows = [];
   }
   // 原生端只负责把配对设备全给出来，认品牌是这边的事；认不出的（键盘、鼠标、手机）直接丢掉，
-  // 但要在诊断里留一行：少一台时得能分清是原生没给、还是给了但没认上
-  const dropped = rows.filter((peer) => !brandForName(peer.name)).map((peer) => peer.name || peer.address);
+  // 这台宿主没有对应通道的品牌也丢掉（商店版只报 BLE，华为卡片点进去也连不上），
+  // 但要在诊断里留一行：少一台时得能分清是原生没给、没认上、还是这台机器走不通
+  const usable = new Set(brandsHere().map((brand) => brand.id));
+  const brandId = (peer) => brandForName(peer.name)?.id ?? null;
+  const dropped = rows
+    .filter((peer) => {
+      const id = brandId(peer);
+      return !id || !usable.has(id);
+    })
+    .map((peer) => peer.name || peer.address);
   peerDiag = { total: rows.length, matched: rows.length - dropped.length, dropped };
-  logLine("hub", `enumerate-end 原生给了 ${rows.length} 台，认得 ${peerDiag.matched}`, {
+  logLine("hub", `enumerate-end 原生给了 ${rows.length} 台，能用 ${peerDiag.matched}`, {
     stage: "C", event: "enumerate-end",
     detail: rows.map((p) => `${p.name || "(无名)"}@${p.address || "-"}=${brandForName(p.name)?.id ?? "no-match"}`).join(" | ")
       + ` 用时=${Math.round(performance.now() - startedAt)}ms`,
   });
   // 逐台写排除原因：以后少一台，直接看是没名字还是没匹配上
   for (const row of rows) {
-    if (brandForName(row.name)) continue;
-    const reason = exclusionReason(row.name);
+    const id = brandId(row);
+    if (id && usable.has(id)) continue;
+    const reason = exclusionReason(row.name, usable);
     logLine("hub", `excluded ${row.name || "(无名)"}@${row.address || "-"} reason=${reason}`, {
       stage: "C", event: "device-excluded", level: "info",
       detail: `${reason} name=${row.name || ""} address=${row.address || ""}`,
@@ -547,11 +558,11 @@ window.onDeviceList = (json) => {
   const droppedNow = dropped.join("\u0000");
   if (droppedNow !== droppedSig) {
     droppedSig = droppedNow;
-    if (dropped.length) log(`配对 ${rows.length} 台，认不出：${dropped.join(" / ")}`);
+    if (dropped.length) log(`配对 ${rows.length} 台，没显示：${dropped.join(" / ")}`);
   }
   state.peers = rows
-    .map((peer) => ({ ...peer, brand: brandForName(peer.name)?.id }))
-    .filter((peer) => peer.brand);
+    .map((peer) => ({ ...peer, brand: brandId(peer) }))
+    .filter((peer) => peer.brand && usable.has(peer.brand));
   // 轮询里大部分回包一模一样，内容没变就不重画：重画会把手指底下的方块换掉
   const sig = state.peers
     .map((peer) => [peer.name ?? "", peer.address ?? "", peer.brand ?? "", Boolean(peer.connected)].join("\u0000"))
