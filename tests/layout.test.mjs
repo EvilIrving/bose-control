@@ -102,3 +102,28 @@ test("chip 行的布局不被 id 规则改掉", () => {
 test("#shortcut 只是容器，不自己吃样式", () => {
   assert.ok(!ownRule("shortcut"), "又给 #shortcut 加样式了，它会掉出 .chips 的横向滚动");
 });
+
+function sectionTagFor(id) {
+  const idx = html.indexOf(`id="${id}"`);
+  assert.ok(idx > 0, `#${id} 不在页面里`);
+  const start = html.lastIndexOf("<section", idx);
+  return html.slice(start, html.indexOf(">", start) + 1);
+}
+
+test("设置页设备相关块默认隐藏，未连接不留空标题", () => {
+  for (const id of [
+    "rename",
+    "shortcut",
+    "favorites",
+    "voice",
+    "behaviour",
+    "standby",
+    "playing",
+    "info",
+    "headset-actions",
+  ]) {
+    assert.match(sectionTagFor(id), /\bhidden\b/, `#${id} 所在块没默认隐藏`);
+  }
+  assert.doesNotMatch(sectionTagFor("lang"), /\bhidden\b/, "语言块不该默认隐藏");
+  assert.doesNotMatch(sectionTagFor("diag-actions"), /\bhidden\b/, "诊断块不该默认隐藏");
+});

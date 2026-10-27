@@ -293,9 +293,32 @@ function exportDiag() {
   }
 }
 
+function deviceSettingPanes() {
+  return [
+    ui.rename,
+    ui.shortcut,
+    ui.favorites,
+    ui.voice,
+    ui.behaviour,
+    ui.standby,
+    ui.playing,
+    ui.info,
+    ui.headset,
+  ];
+}
+
+function hideDeviceSettings() {
+  for (const el of deviceSettingPanes()) pane(el, false);
+}
+
 function renderSettings() {
   renderLanguage();
-  session?.renderSettings?.();
+  if (sessionLive()) {
+    renderInfo();
+    session?.renderSettings?.();
+  } else {
+    hideDeviceSettings();
+  }
   renderDiag();
 }
 
@@ -320,6 +343,7 @@ function renderDiag() {
   }
   const note = diagNote();
   if (note) note.textContent = canExport && diagExport ? exportText(diagExport) : "";
+  pane(ui.diagActions, canExport || Boolean(diagExport));
 }
 
 function setPage(page) {
@@ -388,6 +412,7 @@ function paintAll() {
     deviceMenu.close(false);
     ui.status.textContent = "";
     ui.meta.textContent = "";
+    hideDeviceSettings();
     return;
   }
   ui.status.textContent = state.name || link.name || "";
