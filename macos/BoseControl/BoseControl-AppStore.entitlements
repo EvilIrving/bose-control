@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- Mac App Store 要求沙盒（审核指南 2.4.5），这个配置只给商店版用 -->
+	<key>com.apple.security.app-sandbox</key>
+	<true/>
+	<key>com.apple.security.device.bluetooth</key>
+	<true/>
+	<!-- WKWebView 的 WebContent 走网络进程；缺这一条页面会在沙盒里被回收 -->
+	<key>com.apple.security.network.client</key>
+	<true/>
+	<!-- 诊断导出写到 ~/Downloads -->
+	<key>com.apple.security.files.downloads.read-write</key>
+	<true/>
+</dict>
+</plist>

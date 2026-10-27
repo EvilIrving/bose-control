@@ -6,6 +6,16 @@ import WebKit
 private let assetScheme = "bose"
 private let startURL = "bose://app/index.html"
 
+// 商店版只报 BLE：华为走经典蓝牙串口，Mac App Store 的沙盒不保证这条通道，
+// 所以 AppStore 配置只留 Bose；直装版仍同时报 BLE + SPP。
+#if APPSTORE
+private let bridgeTransportsJSON = #"["ble"]"#
+private let bridgePlatformJSON = #"{"platform":"macos","transports":["ble"],"hub":true}"#
+#else
+private let bridgeTransportsJSON = #"["ble","spp"]"#
+private let bridgePlatformJSON = #"{"platform":"macos","transports":["ble","spp"],"hub":true}"#
+#endif
+
 final class WebBundleHandler: NSObject, WKURLSchemeHandler {
     private let root: URL
 
@@ -383,9 +393,9 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
 
     private let nativeBridgeJS = """
     window.NativeBLE = {
-      transports: ["ble", "spp"],
+      transports: \(bridgeTransportsJSON),
       hub: true,
-      platform: function () { return JSON.stringify({ platform: "macos", transports: ["ble", "spp"], hub: true }); },
+      platform: function () { return JSON.stringify(\(bridgePlatformJSON)); },
       bleScan: function () { window.webkit.messageHandlers.bleScan.postMessage({}); },
       bleConnect: function (payload) { window.webkit.messageHandlers.bleConnect.postMessage(String(payload)); },
       sendData: function (hex) { window.webkit.messageHandlers.sendData.postMessage(String(hex)); },
