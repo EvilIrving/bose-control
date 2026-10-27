@@ -570,6 +570,11 @@ section h2 {
   grid-template-columns: minmax(0, 1fr) 2.4rem;
 }
 
+/* 滑轨是贴满行高的，下面那排开关要自己让出间距，不然两块贴在一起 */
+#cnc-toggles:not(:empty) {
+  margin-top: 0.65rem;
+}
+
 .track {
   display: flex;
   align-items: center;
