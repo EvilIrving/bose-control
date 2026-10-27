@@ -60,7 +60,7 @@ python3 server.py
 
 `ios/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`，CoreBluetooth 连 FEBE。
 
-Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Team 后真机安装。审核按硬件配套工具交：备注型号，附一段连接改降噪的视频。
+iPhone 和 iPad 都能装，iPad 四方向都支持。Info.plist 已有 `NSBluetoothAlwaysUsageDescription`。用开发者账号选 Team 后真机安装。审核按硬件配套工具交：备注型号，附一段连接改降噪的视频。
 
 华为在 iOS 上做不了：系统不把 SPP / RFCOMM 开放给第三方 App。iPhone 上怎么管华为耳机，见「[iPhone 上怎么管华为耳机](#iphone-上怎么管华为耳机)」。
 
@@ -91,6 +91,11 @@ xcodebuild -project ios/BoseControl.xcodeproj -target BoseControl -sdk iphoneos
 ## macOS
 
 `macos/BoseControl.xcodeproj`。WKWebView 加载内置 `Web/`。
+
+两个 scheme：
+
+- `BoseControl`：直装版，沙盒关闭，Bose BLE + 经典蓝牙串口（华为）都能用。
+- `BoseControl-AppStore`：Mac App Store 版，开启 App Sandbox，只保留 Bose BLE。华为走 SPP，沙盒下这条通道不保证，所以商店版不列华为设备；诊断导出写到 `~/Downloads`，页面靠 WKWebView 的 `network.client` 权限才能在沙盒里跑起来。
 
 启动就进设备中心：`IOBluetoothDevice.pairedDevices()` 里挑出名字像 Bose / 华为的，按「已连接 → 未连接、同组按名字」排好，交给页面渲染。点一台就连一台：
 
