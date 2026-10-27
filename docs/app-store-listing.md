@@ -13,30 +13,26 @@
 
 **中文**
 
-不登录、不联网，用蓝牙直接控制 Bose 耳机。官方 App 要账号、要云；这里只做一件事：Mac 直连耳机，数据不出本机。
+不登录、不联网，用蓝牙直接控制 Bose 耳机。
+设置写进耳机，数据不出本机。
 
-- 模式：降噪、通透、自定义模式，机身上的模式键也能切
-- 音效：均衡器、沉浸式音频、风噪滤除
-- 通话与连接：多点连接、对话模式、自动接听、自动播放暂停
-- 耳机：电量、设备信息、语音提示、自动关机、快捷动作
-- 设置直接写进耳机，换一台设备继续用
+降噪、通透、自定义模式。
+均衡器、沉浸式音频、风噪滤除。
+多点连接、对话模式、自动接听。
 
-需要先在这台 Mac 的系统设置里配好 Bose 耳机。App 不会上传任何数据，也没有账号。
-
+先在系统设置里配好耳机。
 Bose 是 Bose Corporation 的商标。本 App 与 Bose Corporation 没有隶属或背书关系。
 
 **English**
 
-Control Bose headphones over Bluetooth. No account, no cloud, no telemetry — the app talks to the headphones directly and keeps everything on your Mac.
+Control Bose headphones over Bluetooth. No account, no cloud.
+Settings are written to the headset and stay on this device.
 
-- Modes: noise cancelling, transparency, custom modes, and the on-headset mode button
-- Sound: equalizer, immersive audio, wind noise reduction
-- Calls and connections: multipoint, conversation mode, auto-answer, auto-pause
-- Headset: battery, device information, voice prompts, auto-off, shortcut action
-- Settings are written to the headphones, so they follow the device
+Noise cancelling, transparency, custom modes.
+Equalizer, immersive audio, wind block.
+Multipoint, conversation mode, auto-answer.
 
-Pair your Bose headphones with this Mac first. The app uploads nothing and has no account.
-
+Pair the headset in system settings first.
 Bose is a trademark of Bose Corporation. This app is not affiliated with or endorsed by Bose Corporation.
 
 ## 关键词
@@ -84,10 +80,11 @@ The App Store build supports Bose only. HUAWEI earbuds use a classic Bluetooth s
 
 ## 截图
 
-| 平台 | 要求 | 状态 |
-| --- | --- | --- |
-| macOS | 2880×1800（或 1440×900 / 2560×1600 / 1280×800） | `store-assets/macos/01-devices-2880x1800.png` 已生成 |
-| iPhone | 按 App Store Connect 当前要求，至少一张 6.9 英寸 | 需要真机 + 已连接的 Bose 耳机 |
-| iPad | 按 App Store Connect 当前要求，至少一张 13 英寸 | 需要真机 + 已连接的 Bose 耳机 |
+Figma：https://www.figma.com/design/RxtAiv11kHC9HoQJdNmCDu/Bose-Connector
 
-iPhone / iPad 截图要用真实连接的 Bose 控制页；模拟器没有蓝牙，截出来只有「不支持蓝牙」，不能作为商店素材。
+| 平台 | 尺寸 | 文件 |
+| --- | --- | --- |
+| iPhone 6.9" | 1290×2796 × 8 | `store-assets/iphone/01`–`08-*-1290x2796.png` |
+| macOS | 2880×1800 | `store-assets/macos/01-devices-2880x1800.png` |
+
+iPhone 八张标题：不登录，不联网 / 系统里的耳机，点一下就连 / 降噪、通透、自定义模式 / 均衡器写进耳机 / 沉浸式音频，风噪滤除 / 双连、对话、自动接听 / 快捷动作，按机身键生效 / 换一台设备，设置还在。

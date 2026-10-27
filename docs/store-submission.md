@@ -33,7 +33,8 @@
 | --- | --- |
 | 已验证 | iOS 模拟器 Release 构建通过，包内版本 `0.2.0 (3)`，方向声明和 `PrivacyInfo.xcprivacy` 都在包里。iPad 模拟器能装能开。 |
 | 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol`），确认没被占用。TestFlight 的 CI 已配好，需要 `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY` 三个 secrets。 |
-| 必做 | 截图（iPhone + iPad）、隐私政策 URL、支持 URL、年龄分级、审核备注。硬件配套 App 要写清支持的型号，并附一段真机连接、改降噪的视频。 |
+| 已完成 | iPhone 6.9" 截图 8 张（1290×2796）在 `store-assets/iphone/`，Figma：https://www.figma.com/design/RxtAiv11kHC9HoQJdNmCDu/Bose-Connector |
+| 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol`）。文案、隐私 URL、审核备注见 `docs/app-store-listing.md`。审核视频仍要真机连 Bose 改一次降噪。 |
 
 ## Google Play（暂缓上架）
 
