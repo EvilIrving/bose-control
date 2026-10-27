@@ -20,7 +20,9 @@
 | 已完成 | `BoseControl-AppStore` 开沙盒（`com.apple.security.app-sandbox = true`），带蓝牙、`files.downloads.read-write`、Wi-Fi/网络客户端权限。Mac App Store 审核指南 2.4.5 要求沙盒。 |
 | 已验证 | 用开发签名把商店版跑起来：沙盒生效，页面加载成功，`IOBluetoothDevice.pairedDevices()` 仍能读到系统配对设备，设备中心只显示 Bose QC Ultra 2，华为两台被过滤。 |
 | 已验证 | 沙盒里 WKWebView 必须有 `com.apple.security.network.client`，缺了 WebView 进程会被系统回收、页面全黑。这条已经写进商店版 entitlements。 |
-| 未验证 | 经典蓝牙 RFCOMM（华为 SPP）在沙盒下没测。商店版已经主动不暴露它，所以不影响 Bose；直装版继续用 `BoseControl` 配置。 |
+| 已验证 | 商店版连接直接走 BLE，不再先试 RFCOMM；沙盒里 BLE 扫描能拿到周围 23 台广播。诊断导出走真实 `~/Downloads`（沙盒里 `.downloadsDirectory` 会落到容器，已改用 `getpwuid` 的真实家目录，单独用沙盒探针验过写入成功）。 |
+| 未验证 | 实际连上 Bose 并读设置：测试时 QC Ultra 2 没开机/没广播，扫描找不到。上架前耳机开着再点一次。 |
+| 说明 | 经典蓝牙 RFCOMM（华为 SPP）在沙盒下没测。商店版主动不暴露它，连接也不会尝试；直装版继续用 `BoseControl` 配置。 |
 | 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol.mac`，Team `QZZ878S3NS`），准备截图、描述、关键词、隐私政策 URL、审核备注。 |
 
 ## iOS App Store

@@ -1,5 +1,6 @@
 import IOBluetooth
 import AppKit
+import Darwin
 import SwiftUI
 import WebKit
 
@@ -11,9 +12,11 @@ private let startURL = "bose://app/index.html"
 #if APPSTORE
 private let bridgeTransportsJSON = #"["ble"]"#
 private let bridgePlatformJSON = #"{"platform":"macos","transports":["ble"],"hub":true}"#
+let storeBuildAllowsSPP = false
 #else
 private let bridgeTransportsJSON = #"["ble","spp"]"#
 private let bridgePlatformJSON = #"{"platform":"macos","transports":["ble","spp"],"hub":true}"#
+let storeBuildAllowsSPP = true
 #endif
 
 final class WebBundleHandler: NSObject, WKURLSchemeHandler {
@@ -289,8 +292,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     /// 唯一导出实现：pageText 为 nil 表示页面不可用（原生故障入口）。
     private func exportDiagnostics(pageText: String?, reason: String, notify: ((Bool, String) -> Void)?) {
         let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
-        let dir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-            ?? FileManager.default.temporaryDirectory
+        let dir = exportDirectory()
         let unique = UUID().uuidString.prefix(8)
         let url = dir.appendingPathComponent("bose-diag-\(stamp)-\(unique).txt")
         let head = pageText ?? "# Bose Connector 原生诊断\n\(reason)\n"
@@ -406,6 +408,19 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
       diagLog: function (json) { window.webkit.messageHandlers.diagLog.postMessage(String(json)); }
     };
     """
+
+    // 沙盒里 .downloadsDirectory 会解析到 App 容器里的 Downloads，用户在外面看不到。
+    // 商店版用 getpwuid 拿真实家目录；entitlements 里的 downloads 权限允许直接写那里。
+    private func exportDirectory() -> URL {
+        #if APPSTORE
+        if let pw = getpwuid(getuid()) {
+            return URL(fileURLWithPath: String(cString: pw.pointee.pw_dir))
+                .appendingPathComponent("Downloads")
+        }
+        #endif
+        return FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
+            ?? FileManager.default.temporaryDirectory
+    }
 
     private func escape(_ text: String) -> String {
         text

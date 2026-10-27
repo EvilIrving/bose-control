@@ -36,8 +36,9 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
         ble.targetName = rfcomm.targetName
         triedBle = false
         triedRfcomm = false
-        allowBle = transport != "spp"
-        if transport == "spp" || (address != nil && rfcomm.hasPairedDevice) {
+        allowBle = transport != "spp" || !storeBuildAllowsSPP
+        // 商店版不许碰经典蓝牙：即使页面点名了已配对设备，也直接走 BLE
+        if storeBuildAllowsSPP && (transport == "spp" || (address != nil && rfcomm.hasPairedDevice)) {
             triedRfcomm = true
             Diag.log("known target，直接走 rfcomm", stage: "D")
             rfcomm.connect()
@@ -71,13 +72,13 @@ final class BmapClient: NSObject, BleClientDelegate, RfcommClientDelegate {
 
     func bleDidFail(_ message: String) {
         guard !reported else { return }
-        if !triedRfcomm && rfcomm.hasPairedDevice {
+        if storeBuildAllowsSPP && !triedRfcomm && rfcomm.hasPairedDevice {
             triedRfcomm = true
             Diag.fail("ble 失败（\(message)），改试 rfcomm", stage: "D")
             rfcomm.connect()
             return
         }
-        Diag.fail("ble 失败（\(message)），也没有已配对设备", stage: "D")
+        Diag.fail(storeBuildAllowsSPP ? "ble 失败（\(message)），也没有已配对设备" : "ble 失败（\(message)）", stage: "D")
         delegate?.bmapDidFail(message)
     }
 
