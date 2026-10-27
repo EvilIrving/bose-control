@@ -23,7 +23,9 @@
 | 已验证 | 商店版连接直接走 BLE，不再先试 RFCOMM；沙盒里 BLE 扫描能拿到周围 23 台广播。诊断导出走真实 `~/Downloads`（沙盒里 `.downloadsDirectory` 会落到容器，已改用 `getpwuid` 的真实家目录，单独用沙盒探针验过写入成功）。 |
 | 未验证 | 实际连上 Bose 并读设置：测试时 QC Ultra 2 没开机/没广播，扫描找不到。上架前耳机开着再点一次。 |
 | 说明 | 经典蓝牙 RFCOMM（华为 SPP）在沙盒下没测。商店版主动不暴露它，连接也不会尝试；直装版继续用 `BoseControl` 配置。 |
-| 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol.mac`，Team `QZZ878S3NS`），准备截图、描述、关键词、隐私政策 URL、审核备注。 |
+| 已完成 | 归档和导出都成功，产物在 `macos/build/export/Bose Connector.pkg`（3rd Party Mac Developer Installer 签名，Mac Team Store 描述文件，版本 `0.2.0 (3)`）。归档可用脚本重新生成。 |
+| **唯一阻塞** | App Store Connect 里还没有 `cain.com.bosecontrol.mac` 的 App 记录。`xcodebuild` 上传直接报 `App record ... not found`。建记录只能在 App Store Connect 网站点「+ → New App」，要账号登录和 2FA；API 明确不支持创建 app（`POST /v1/apps` 返回 403）。 |
+| 建完记录后 | 跑 `sh scripts/upload-macos-appstore.sh`，会自动归档、导出并上传。文案在 `docs/app-store-listing.md`。 |
 
 ## iOS App Store
 
