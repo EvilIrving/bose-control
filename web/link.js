@@ -1,4 +1,4 @@
-import { getLang } from "./labels.js";
+import { getLang, pick } from "./labels.js";
 
 export const LINK_TEXT = {
   idle: { zh: "请先连接耳机", en: "Connect headphones first" },
@@ -60,15 +60,37 @@ export function linkText(link) {
 }
 
 // 顶栏那一小串电量：一条读数就只写百分比，多段才带 L / R / C
-function batteryLabel(component, three) {
-  const zh = getLang() === "zh";
-  if (three) return component === 1 ? (zh ? "盒" : "Case") : component === 0 ? (zh ? "左" : "L") : zh ? "右" : "R";
-  return component === 0 ? (zh ? "左" : "L") : component === 1 ? (zh ? "右" : "R") : zh ? "电" : "Battery";
+// 电量前面那个组件名。组件号是耳机自己报的固定编号，不是回包里的位置：
+// QC Ultra 2 Earbuds 实测 0x01 右、0x02 左、0x03 盒；单电池机型只有 0x00。
+// 以前把 1 当成「盒」、把 0 当成「左」，三段电量"左 96% · 右 100% · 盒 59%"
+// 实际显示的是错位的值。
+const COMPONENT_LABEL = {
+  0: { zh: "电量", en: "Battery" },
+  1: { zh: "右", en: "R" },
+  2: { zh: "左", en: "L" },
+  3: { zh: "盒", en: "Case" },
+  4: { zh: "左右", en: "Buds" },
+};
+
+function batteryLabel(component) {
+  const label = COMPONENT_LABEL[component];
+  if (!label) return getLang() === "zh" ? "电量" : "Battery";
+  return pick(label);
 }
+
+// 多段读数按组件号排序：右、左、盒。耳机报的顺序不保证稳定，
+// 同一台设备两次读回来的顺序不一样会让界面上的数字跳位置。
+const COMPONENT_ORDER = [1, 2, 3, 4, 0];
 
 export function batteryText(rows) {
   if (!rows?.length) return "";
   if (rows.length === 1) return `${rows[0].level}%`;
-  const three = rows.length >= 3;
-  return rows.map((row) => `${batteryLabel(row.component, three)} ${row.level}%`).join(" · ");
+  const sorted = [...rows].sort(
+    (a, b) => COMPONENT_ORDER.indexOf(a.component) - COMPONENT_ORDER.indexOf(b.component),
+  );
+  // 0x04 是左右合并读数，只有左右单读数缺失时才有意义；两者都在就不重复报
+  const withoutAggregate = sorted.some((row) => row.component === 1 || row.component === 2)
+    ? sorted.filter((row) => row.component !== 4)
+    : sorted;
+  return withoutAggregate.map((row) => `${batteryLabel(row.component)} ${row.level}%`).join(" · ");
 }

@@ -28,6 +28,7 @@ export const FUNC = {
   VOICE_PROMPTS: 0x03,
   STANDBY: 0x04,
   CNC: 0x05,
+  ANR: 0x06,
   FIRMWARE: 0x05,
   MAC_ADDRESS: 0x06,
   SERIAL_NUMBER: 0x07,
@@ -58,6 +59,45 @@ export const FUNC = {
   DEVICE_LIST: 0x04,
   PAIRING: 0x08,
   TRANSPORT: 0x03,
+};
+
+// BMAP 错误码：回包 operator=ERROR 时 payload[0] 就是它。
+// 区分「永久」和「暂时」是关键：OpNotSupp 说明这条路这台耳机不给走，重发一次只是把
+// 同一个错误再问一遍；Runtime / Timeout / DataUnavailable 才是值得再试的。
+export const BMAP_ERROR = {
+  0: "Unknown",
+  1: "Length",
+  2: "Chksum",
+  3: "FblockNotSupp",
+  4: "FuncNotSupp",
+  5: "OpNotSupp",
+  6: "InvalidData",
+  7: "DataUnavailable",
+  8: "Runtime",
+  9: "Timeout",
+  10: "InvalidState",
+  20: "InsecureTransport",
+};
+
+const RETRYABLE_ERROR = new Set([7, 8, 9]);
+
+export function bmapErrorName(code) {
+  return BMAP_ERROR[code] ?? `Error${code}`;
+}
+
+export function isRetryableError(code) {
+  return RETRYABLE_ERROR.has(code);
+}
+
+// 电池组件号是耳机自己报的固定编号，不是回包里的位置。
+// QC Ultra 2 Earbuds 实测：0x01 右、0x02 左、0x03 盒、0x04 左右合并；
+// 单电池机型（QC Ultra 2 HP 等）只有一条 0x00。
+export const BATTERY_COMPONENT = {
+  MAIN: 0,
+  RIGHT: 1,
+  LEFT: 2,
+  CASE: 3,
+  BOTH: 4,
 };
 
 export const PROMPTS = {
@@ -220,14 +260,19 @@ export function parseBattery(payload) {
   if (!payload.length) return [];
   if (payload.length % 4 === 0 && payload.length >= 4) {
     const rows = [];
+    const seen = new Set();
     for (let i = 0; i + 3 < payload.length; i += 4) {
-      if (payload[i] <= 100) {
-        rows.push({ level: payload[i], component: payload[i + 3] });
-      }
+      const component = payload[i + 3];
+      // 同一组件重复上报时保留第一条：后面的不覆盖已读到的值
+      if (seen.has(component)) continue;
+      // 0xFF 是「这一格不适用」，不是电量
+      if (payload[i] > 100) continue;
+      seen.add(component);
+      rows.push({ level: payload[i], component });
     }
     if (rows.length) return rows;
   }
-  return [{ level: payload[0], component: 0 }];
+  return [{ level: payload[0], component: BATTERY_COMPONENT.MAIN }];
 }
 
 export function parseFirmware(payload) {
@@ -365,6 +410,20 @@ export function parseEq(payload) {
   return bands;
 }
 
+// [1.6] ANR：QC35 / QC45 的消噪接口，四档枚举，不是连续值。
+// 回包一个字节：0=off 1=high 2=wind 3=low。
+export const ANR_LABELS = { 0: "off", 1: "high", 2: "wind", 3: "low" };
+
+export function parseAnr(payload) {
+  if (!payload.length) return null;
+  const value = payload[0];
+  return ANR_LABELS[value] ? value : null;
+}
+
+export function anrPayload(level) {
+  return Uint8Array.of(level & 0xff);
+}
+
 export function parseSidetone(payload) {
   if (payload.length < 2) return 0;
   return payload[1];
@@ -397,40 +456,78 @@ export function parseModeCaps(payload) {
   };
 }
 
+// 31.6 ModeConfig 的字节布局按固件分家，同一功能块不同型号的字段位置并不一致。
+// 只能按回包长度判，不能按型号写死 —— 型号表和固件版本对不上是常态。
+//
+//   ultra2  48 字节  QC Ultra 2 HP / QC Ultra 2 Earbuds：cnc42 auto43 spatial44 wind45 anc47
+//   prince  47 字节  QC Headphones / QC 45：cnc42 auto43 spatial44 wind46，没有 anc 位
+//   legacy  41..46   QC Earbuds：只有名字和可编辑位，没有 cnc / spatial / wind
+//   echo40  40 字节  SET：SETGET 原样回显，名字从 3 起，字段依次跟在名字后
+//   echo39  39 字节  同上，没有 anc 位
+const MODE_LAYOUTS = {
+  ultra2: { status: true, name: [6, 38], cnc: 42, auto: 43, spatial: 44, wind: 45, anc: 47 },
+  prince: { status: true, name: [6, 38], cnc: 42, auto: 43, spatial: 44, wind: 46, anc: null },
+  legacy: { status: true, name: [6, 38], cnc: null, auto: null, spatial: null, wind: null, anc: null },
+  echo40: { status: false, name: [3, 35], cnc: 35, auto: 36, spatial: 37, wind: 38, anc: 39 },
+  echo39: { status: false, name: [3, 35], cnc: 35, auto: 36, spatial: 37, wind: 38, anc: null },
+};
+
+export function modeConfigLayout(length) {
+  if (length >= 48) return "ultra2";
+  if (length === 47) return "prince";
+  if (length === 40) return "echo40";
+  if (length === 39) return "echo39";
+  if (length >= 41) return "legacy";
+  return null;
+}
+
 export function parseModeConfig(payload) {
-  if (payload.length < 6) return null;
+  if (!payload || payload.length < 6) return null;
+  const layoutName = modeConfigLayout(payload.length);
+  const layout = MODE_LAYOUTS[layoutName];
+  if (!layout) return null;
   const promptId = payload[2];
-  const nameFromDevice = payload.length >= 38 ? cstr(payload.slice(6, 38)) : "";
+  const [nameFrom, nameTo] = layout.name;
+  const nameFromDevice = payload.length >= nameTo ? cstr(payload.slice(nameFrom, nameTo)) : "";
   const promptName = PROMPTS[promptId] ?? "";
+  const at = (index) => (index != null && payload.length > index ? payload[index] : null);
   return {
+    layout: layoutName,
     index: payload[0],
     prompt: [payload[1] ?? 0, promptId],
     promptId,
     name: nameFromDevice || promptName || `模式 ${payload[0]}`,
-    editable: payload[3] === 1,
-    configured: payload.length > 4 ? payload[4] === 1 : true,
-    favorite: payload.length > 5 ? payload[5] === 1 : false,
-    cnc: payload.length > 42 ? payload[42] : null,
-    auto: payload.length > 43 ? payload[43] === 1 : false,
-    spatial: payload.length > 44 ? payload[44] : null,
-    wind: payload.length > 46 ? payload[46] === 1 : false,
-    anc: payload.length > 47 ? payload[47] === 1 : false,
+    editable: layout.status ? payload[3] !== 0 : true,
+    configured: layout.status && payload.length > 4 ? payload[4] !== 0 : true,
+    favorite: layout.status && payload.length > 5 ? payload[5] !== 0 : false,
+    cnc: at(layout.cnc),
+    auto: layout.auto == null ? false : at(layout.auto) === 1,
+    spatial: at(layout.spatial),
+    wind: layout.wind == null ? false : at(layout.wind) === 1,
+    // 没有 anc 位的机型不能当成「关着」：报 null，界面据此不提供该开关
+    anc: layout.anc == null ? null : at(layout.anc) === 1,
   };
 }
 
 // SETGET 31.6 payload is 40 bytes: mode, prompt(2), name(32), cnc, auto, spatial, wind, anc.
 // The 48-byte reply packs the same tail at 42/43/44/46/47 behind a mutability bitfield at 41.
+// 写模式只走 40 字节这一种布局（QC Ultra 2 系）；39 字节的 prince 机型不许 anc 位。
+// 以前所有机型都发 40 字节，49 字节机型收到多余的 anc 字节会拒写，39 字节机型会把
+// 末尾那个位当 anc 收下。两种都不报错，只是不生效。
 export function modeConfigPayload(mode) {
-  const out = new Uint8Array(40);
+  const withAnc = mode.anc !== null && mode.anc !== undefined;
+  const out = new Uint8Array(withAnc ? 40 : 39);
   out[0] = mode.index & 0xff;
   out[1] = mode.prompt?.[0] ?? 0;
   out[2] = mode.prompt?.[1] ?? 0;
   putCstr(out, 3, mode.name, 32);
   out[35] = (mode.cnc ?? 0) & 0xff;
+  // auto 恒发 0：固件对 autoCNC=1 回 Runtime 错误，只接受手动消噪。
+  // 界面上的「自动消噪」开关仍然写这里，但那是耳机自己的判断，不是我们能强制的。
   out[36] = mode.auto ? 1 : 0;
   out[37] = (mode.spatial ?? 0) & 0xff;
   out[38] = mode.wind ? 1 : 0;
-  out[39] = mode.anc ? 1 : 0;
+  if (withAnc) out[39] = mode.anc ? 1 : 0;
   return out;
 }
 

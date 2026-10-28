@@ -34,6 +34,10 @@ import {
   parseProductId,
   productIdOf,
   parseModeConfig,
+  parseAnr,
+  anrPayload,
+  bmapErrorName,
+  isRetryableError,
   parseName,
   parseMultipoint,
   parseSidetone,
@@ -469,4 +473,91 @@ test("QC Ultra 2 HP 真机回包：01.09 快捷动作只报 4 个可用项", () 
     supported: [1, 14, 16, 19],
     unavailable: [],
   });
+});
+
+// ---- 机型适配：这些数字都来自真机抓包，改错就必须红 ----
+
+test("电量按组件号认部件：01 右、02 左、03 盒（不是按位置）", () => {
+  // QC Ultra 2 Earbuds 真机：[level, _, _, component] 四字节一组
+  const rows = parseBattery(
+    Uint8Array.from([0x3c, 0xff, 0xff, 0x01, 0x3c, 0xff, 0xff, 0x02, 0x50, 0xff, 0xff, 0x03, 0x3c, 0xff, 0xff, 0x04]),
+  );
+  assert.deepEqual(rows, [
+    { level: 60, component: 1 },
+    { level: 60, component: 2 },
+    { level: 80, component: 3 },
+    { level: 60, component: 4 },
+  ]);
+});
+
+test("电量同一组件重复上报时保留第一条，0xFF 不当电量", () => {
+  const rows = parseBattery(
+    Uint8Array.from([0x50, 0xff, 0xff, 0x01, 0x10, 0xff, 0xff, 0x01, 0xff, 0xff, 0xff, 0x03]),
+  );
+  assert.deepEqual(rows, [{ level: 80, component: 1 }]);
+});
+
+test("31.6 回包按长度分家：48 字节 ultra2 / 47 prince / 40 SETGET 回显", () => {
+  const status48 = new Uint8Array(48);
+  status48[0] = 2;
+  status48[42] = 7; // cnc
+  status48[44] = 2; // spatial
+  status48[45] = 1; // wind（不是 46！）
+  status48[46] = 0;
+  status48[47] = 0;
+  const ultra = parseModeConfig(status48);
+  assert.equal(ultra.layout, "ultra2");
+  assert.equal(ultra.cnc, 7);
+  assert.equal(ultra.wind, true, "wind 在 45，读到 46 会错");
+  assert.equal(ultra.anc, false);
+
+  const status47 = new Uint8Array(47);
+  status47[0] = 0;
+  status47[42] = 9;
+  status47[46] = 1; // prince 的 wind 在 46
+  const prince = parseModeConfig(status47);
+  assert.equal(prince.layout, "prince");
+  assert.equal(prince.wind, true);
+  assert.equal(prince.anc, null, "prince 没有 anc 位，不能当成关着");
+
+  const echo40 = new Uint8Array(40);
+  echo40[0] = 5;
+  echo40[3] = 0x41; // 名字从 3 起，不是在 6
+  echo40[35] = 8;
+  echo40[37] = 1;
+  echo40[38] = 1;
+  echo40[39] = 1;
+  const echo = parseModeConfig(echo40);
+  assert.equal(echo.layout, "echo40");
+  assert.equal(echo.name, "A");
+  assert.equal(echo.cnc, 8);
+  assert.equal(echo.anc, true);
+});
+
+test("写模式：没有 anc 位的机型只发 39 字节", () => {
+  const full = modeConfigPayload({ index: 4, name: "x", cnc: 5, anc: true });
+  assert.equal(full.length, 40);
+  const noAnc = modeConfigPayload({ index: 4, name: "x", cnc: 5, anc: null });
+  assert.equal(noAnc.length, 39);
+  assert.equal(noAnc[38], 0, "风噪位还在 38");
+});
+
+test("BMAP 错误码：OpNotSupp 不重试，Runtime / Timeout 才重试", () => {
+  assert.equal(bmapErrorName(5), "OpNotSupp");
+  assert.equal(bmapErrorName(20), "InsecureTransport");
+  assert.equal(isRetryableError(5), false, "重复问一次 OpNotSupp 还是同一个回答");
+  assert.equal(isRetryableError(4), false);
+  assert.equal(isRetryableError(3), false);
+  for (const code of [7, 8, 9]) {
+    assert.equal(isRetryableError(code), true, `错误码 ${code} 应该可以再试`);
+  }
+});
+
+test("[1.6] ANR 四档：off/high/wind/low，未知值不冒充", () => {
+  assert.equal(parseAnr(Uint8Array.of(0)), 0);
+  assert.equal(parseAnr(Uint8Array.of(1)), 1);
+  assert.equal(parseAnr(Uint8Array.of(2)), 2);
+  assert.equal(parseAnr(Uint8Array.of(3)), 3);
+  assert.equal(parseAnr(Uint8Array.of(9)), null, "未知档位不能当成合法值");
+  assert.deepEqual([...anrPayload(2)], [2]);
 });
