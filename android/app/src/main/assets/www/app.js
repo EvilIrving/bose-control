@@ -357,7 +357,7 @@ function renderSupport() {
 
   const row = document.createElement("div");
   row.className = "chips";
-  const buy = chip(t("support"), false);
+  const buy = chip(t("supportBuy"), false);
   buy.disabled = info.busy;
   buy.addEventListener("click", () => {
     beginPurchase();
