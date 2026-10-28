@@ -21,8 +21,19 @@ import Foundation
 import StoreKit
 
 enum Purchase {
-    /// 产品 ID。App Store Connect 里的「非消耗型」内购，名称「支持开发」。
-    static let productId = "cain.com.bosecontrol.support"
+    /// 产品 ID。App Store Connect 里已经建好（READY_TO_SUBMIT），iOS 和 macOS 是
+    /// 两个不同的 ID，不能共用：
+    ///   iOS   cain.com.bosecontrol.lifetime
+    ///   macOS cain.com.bosecontrol.mac.lifetime
+    /// 名字「永久会员」、NON_CONSUMABLE、¥1、CHN，本地化中英都已配。
+    /// 之前代码写死 cain.com.bosecontrol.support，和实际产品对不上，买了也取不到。
+    static var productId: String {
+        #if os(macOS)
+        return "cain.com.bosecontrol.mac.lifetime"
+        #else
+        return "cain.com.bosecontrol.lifetime"
+        #endif
+    }
 
     /// 购买入口是否出现。直装版编译时走不到这个分支。
     static var showsStorefront: Bool {

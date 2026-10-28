@@ -34,24 +34,39 @@ macOS 商店版走 `BoseControl-AppStore` scheme（AppStore 配置，`SWIFT_ACTI
 
 ## 产品配置
 
-| 字段 | 值 |
-| --- | --- |
-| 产品 ID | `cain.com.bosecontrol.support` |
-| 类型 | 非消耗型（Non-Consumable） |
-| 参考名称 | Support Development |
-| 价格 | ¥1（中国区 Tier 1） |
-| 本地化名称 | 中文「支持开发」/ 英文「Support Development」 |
+**已建好，状态 READY_TO_SUBMIT（2026-10-28 经 asc CLI 核实）。**
 
-## 落地步骤（必须按顺序）
+| 平台 | App ID | 产品 ID | IAP ID | 类型 | 价格 |
+| --- | --- | --- | --- | --- | --- |
+| iOS | 6827714242 | `cain.com.bosecontrol.lifetime` | 6827716081 | 非消耗型 | ¥1（CHN） |
+| macOS | 6827712763 | `cain.com.bosecontrol.mac.lifetime` | 6827715910 | 非消耗型 | ¥1（CHN） |
+
+两个产品：名字「永久会员」，中英文本地化都已配（en-US「Lifetime」/ zh-Hans「永久会员」），描述「一次性买断，永久使用」。产品 ID 是 `lifetime`，不是 `support`——早期代码写错成 `support`，已修正为按平台取 `lifetime` / `mac.lifetime`。
+
+App 记录也已存在：
+
+| 平台 | App ID | Bundle ID | SKU |
+| --- | --- | --- | --- |
+| iOS | 6827714242 | `cain.com.bosecontrol` | bose-connector-ios |
+| macOS | 6827712763 | `cain.com.bosecontrol.mac` | bose-connector-mac |
+
+## 落地步骤（剩余）
 
 | # | 步骤 | 状态 |
 | --- | --- | --- |
-| 1 | App Store Connect 建 App 记录（macOS `cain.com.bosecontrol.mac`，iOS `cain.com.bosecontrol`） | **未完成**，需要在网页操作 + 2FA |
-| 2 | 在 App 记录下建内购产品，填上面的产品 ID 和价格 | 未开始（依赖 1） |
-| 3 | 提审内购，和内购截图一起提交 | 未开始（依赖 2） |
-| 4 | 审核通过后价格生效，`Product.products(for:)` 才能取到产品 | 未开始（依赖 3） |
+| 1 | App Store Connect 建 App 记录 | ✅ 已建（两个都在） |
+| 2 | 建内购产品 | ✅ 已建，READY_TO_SUBMIT，¥1 |
+| 3 | 上传带正确产品 ID 的 build（TestFlight / App Store） | ⏳ 下一步 |
+| 4 | 内购随 build 一起提交审核 | ⏳ 依赖 3 |
+| 5 | 审核通过，价格生效 | ⏳ 依赖 4 |
 
-**阻塞点**：ASC API 无法创建 App 记录（`POST /v1/apps` 返回 403），也无法创建内购产品。这两步只能在 App Store Connect 网页点。本地已有三个 API key（`887JA9KJ89` / `9LR8743L58` / `HWJYYY78F9`）但没有 Issuer ID，所以连查询都做不了——Issuer ID 在 ASC → Users and Access → Integrations 页面里。
+**阻塞已解除。** 之前 `docs/store-submission.md` 写的「唯一阻塞：没有 App 记录」过时了——记录和内购产品都建好了，用 `asc` CLI 直接能查（`asc iap list --app <APP_ID>`）。剩下只是上传 build 把内购带进审核。
+
+本机签发/上传凭据：
+
+- asc CLI 已登录（profile DailyOracle，team 钥 HWJYYY78F9 / 9LR8743L58，Issuer `84d76d9f-…`）
+- 签名身份：Developer ID / Apple Distribution `TIANBAO DONG (QZZ878S3NS)`
+- CI secrets 在 GitHub Environment `APPLE`（见 local-environment 账本）
 
 ## 代码位置
 
@@ -72,7 +87,7 @@ macOS 商店版走 `BoseControl-AppStore` scheme（AppStore 配置，`SWIFT_ACTI
 npm test -- tests/support.test.mjs
 ```
 
-要在真机 / 模拟器上走完整购买流程，需要建一个 `.storekit` 配置文件并在 scheme 里选中它（StoreKit Configuration）。这一步依赖第 2 步的产品建好，否则没有产品可测。
+要在真机 / 模拟器上走完整购买流程，需要建一个 `.storekit` 配置文件并在 scheme 里选中它（StoreKit Configuration），或者直接用沙盒账号在 TestFlight build 里购买（内购已 READY_TO_SUBMIT，产品 ID 已对齐）。
 
 ## 恢复购买
 

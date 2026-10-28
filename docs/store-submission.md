@@ -31,7 +31,7 @@
 | 未验证 | 实际连上 Bose 并读设置：测试时 QC Ultra 2 没开机/没广播，扫描找不到。上架前耳机开着再点一次。 |
 | 说明 | 经典蓝牙 RFCOMM（华为 SPP）在沙盒下没测。商店版主动不暴露它，连接也不会尝试；直装版继续用 `BoseControl` 配置。 |
 | 已完成 | 归档和导出都成功，产物在 `macos/build/export/Bose Connector.pkg`（3rd Party Mac Developer Installer 签名，Mac Team Store 描述文件，版本 `0.2.0 (3)`）。归档可用脚本重新生成。 |
-| **唯一阻塞** | App Store Connect 里还没有 `cain.com.bosecontrol.mac` 的 App 记录。`xcodebuild` 上传直接报 `App record ... not found`。建记录只能在 App Store Connect 网站点「+ → New App」，要账号登录和 2FA；API 明确不支持创建 app（`POST /v1/apps` 返回 403）。 |
+| ✅ 已解除 | App 记录已建（`cain.com.bosecontrol.mac`，App ID 6827712763）。内购 `cain.com.bosecontrol.mac.lifetime` 也已建，¥1、READY_TO_SUBMIT。剩余只是上传 build 把内购带进审核。详情见 [purchase.md](purchase.md)。 |
 | 建完记录后 | 跑 `sh scripts/upload-macos-appstore.sh`，会自动归档、导出并上传。文案在 `docs/app-store-listing.md`。 |
 
 ## iOS App Store
@@ -39,9 +39,9 @@
 | 状态 | 事项 |
 | --- | --- |
 | 已验证 | iOS 模拟器 Release 构建通过，包内版本 `0.2.0 (3)`，方向声明和 `PrivacyInfo.xcprivacy` 都在包里。iPad 模拟器能装能开。 |
-| 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol`），确认没被占用。TestFlight 的 CI 已配好，需要 `ASC_KEY_ID` / `ASC_ISSUER_ID` / `ASC_KEY` 三个 secrets。 |
+| ✅ 已解除 | App 记录已建（`cain.com.bosecontrol`，App ID 6827714242），内购 `cain.com.bosecontrol.lifetime` 已建、¥1、READY_TO_SUBMIT。剩余只是上传 build。 |
 | 已完成 | iPhone 6.9" 截图 8 张（1290×2796）在 `store-assets/iphone/`，Figma：https://www.figma.com/design/RxtAiv11kHC9HoQJdNmCDu/Bose-Connector |
-| 必做 | App Store Connect 建记录（Bundle ID `cain.com.bosecontrol`）。文案、隐私 URL、审核备注见 `docs/app-store-listing.md`。审核视频仍要真机连 Bose 改一次降噪。 |
+| ✅ 已解除 | App 记录已建（App ID 6827714242）。剩余：上传 build、附审核视频（真机连 Bose 改一次降噪）。 |
 
 ## Google Play（暂缓上架）
 
