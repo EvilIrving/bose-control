@@ -13,6 +13,13 @@
   `https://github.com/EvilIrving/bose-control/blob/main/docs/privacy.md`
   作为 App Store / Play 的隐私政策 URL（仓库是公开的）。
 
+## 内购
+
+买断 ¥1，非消耗型，产品 ID `cain.com.bosecontrol.support`。免费版功能完整，不锁功能。
+完整说明、落地顺序和当前阻塞见 [purchase.md](purchase.md)。
+
+代码已完成并编译验证：商店版二进制含产品 ID，直装版为 0 次（编译期隔离，非运行时隐藏）。
+
 ## macOS App Store
 
 | 状态 | 事项 |

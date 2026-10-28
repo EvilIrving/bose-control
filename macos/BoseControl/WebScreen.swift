@@ -103,6 +103,7 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
     private static let handlerNames = [
         "bleScan", "bleConnect", "sendData", "bleDisconnect", "setBrand", "listDevices",
         "exportDiag", "bootError", "appReady", "diagLog",
+        "purchase", "restorePurchase",
     ]
 
     private var web: WKWebView!
@@ -176,6 +177,15 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             injectionTime: .atDocumentStart,
             forMainFrameOnly: true
         ))
+        // 商店版才注入购买状态；直装版（GitHub 免费下载的 dmg）一个字节都不发，
+        // 页面因此不会出现任何付费入口。
+        if Purchase.showsStorefront {
+            uc.addUserScript(WKUserScript(
+                source: "window.__storePending = true;",
+                injectionTime: .atDocumentStart,
+                forMainFrameOnly: true
+            ))
+        }
         let conf = WKWebViewConfiguration()
         conf.userContentController = uc
         conf.defaultWebpagePreferences.allowsContentJavaScript = true
@@ -353,6 +363,20 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             guard let token = message.body as? String, token == session?.token else { return }
             session?.client.disconnect()
             session = nil
+        case "purchase":
+            Task { @MainActor in
+                let result = await Purchase.purchase()
+                Diag.log("购买结果 \(result)", stage: "A")
+                pushStoreState()
+                js("onPurchaseResult(\"\(result)\")")
+            }
+        case "restorePurchase":
+            Task { @MainActor in
+                let owned = await Purchase.restore()
+                Diag.log("恢复购买 \(owned)", stage: "A")
+                pushStoreState()
+                js("onPurchaseResult(\"\(owned ? "purchased" : "cancelled")\")")
+            }
         case "listDevices":
             let payload = HeadsetCatalog.json()
             // 页面自己轮询这一条（设备中心停留期间每 5 秒一次），只有内容变了才记一行
@@ -376,6 +400,8 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
             let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
                 Diag.log("页面已就绪（\(why) \(elapsed)ms）", stage: "A")
+                // 页面起来之后再推商店状态：要读签名收据，是异步的，不能阻塞启动。
+                pushStoreState()
             } else {
                 Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）", stage: "A")
                 offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
@@ -455,6 +481,16 @@ final class WebController: NSViewController, WKScriptMessageHandler, WKNavigatio
         userContent = nil
         web?.stopLoading()
         web?.removeFromSuperview()
+    }
+
+    // 把「是不是商店版 / 买没买」推给页面。查询是异步的（要读签名收据），
+    // 所以页面启动后不阻塞地补一次，而不是在注入脚本里同步塞值。
+    private func pushStoreState() {
+        guard Purchase.showsStorefront else { return }
+        Task { @MainActor in
+            let owned = await Purchase.isPurchased()
+            js("window.onStoreInfo && window.onStoreInfo('\(owned ? "{\\\"store\\\":true,\\\"owned\\\":true}" : "{\\\"store\\\":true,\\\"owned\\\":false}")')")
+        }
     }
 
     private func js(_ code: String) {

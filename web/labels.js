@@ -64,6 +64,14 @@ export const LABELS = {
   headset: { zh: "耳机管理", en: "Headset Actions" },
 
   diag: { zh: "诊断", en: "Diagnostics" },
+  support: { zh: "支持开发", en: "Support Development" },
+  supportThanks: { zh: "谢谢，已解锁", en: "Thank you" },
+  supportPending: { zh: "等待批准", en: "Pending approval" },
+  supportUnavailable: { zh: "暂时无法购买", en: "Purchases unavailable" },
+  supportFailed: { zh: "购买未完成：{detail}", en: "Purchase failed: {detail}" },
+  supportRestore: { zh: "恢复购买", en: "Restore Purchase" },
+  supportBody: { zh: "这个 App 不联网、不要账号。¥1 买断，只是支持继续做下去。", en: "No account, no network. ¥1 once, just supporting the work." },
+  supportLater: { zh: "以后再说", en: "Not now" },
   unknown: { zh: "未知", en: "Unknown" },
   exportDiag: { zh: "导出日志", en: "Export Logs" },
   exportSaved: { zh: "已导出至：{path}（{bytes} 字节）", en: "Saved: {path} ({bytes}B)" },
@@ -93,6 +101,11 @@ export const LABELS = {
   press: { zh: "按键", en: "Button" },
 
   wind: { zh: "风噪滤除", en: "Wind Block" },
+  // QC35 / QC45 的 ANR 四档，措辞对齐官方 App：高 / 低 / 关 / 风噪
+  anr_high: { zh: "高", en: "High" },
+  anr_low: { zh: "低", en: "Low" },
+  anr_off: { zh: "关闭", en: "Off" },
+  anr_wind: { zh: "风噪", en: "Wind" },
   multipoint: { zh: "多点连接", en: "Multipoint" },
   conversation: { zh: "对话模式", en: "Conversation Mode" },
   touch: { zh: "触控控制", en: "Touch Control" },

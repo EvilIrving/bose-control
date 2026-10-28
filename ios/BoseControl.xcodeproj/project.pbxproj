@@ -11,6 +11,7 @@
 		A1000000000000000000003D = {isa = PBXBuildFile; fileRef = A1000000000000000000003C; };
 		A10000000000000000000041 = {isa = PBXBuildFile; fileRef = A10000000000000000000040; };
 		A10000000000000000000051 = {isa = PBXBuildFile; fileRef = A10000000000000000000050; };
+		A1000000000000000000004B = {isa = PBXBuildFile; fileRef = A1000000000000000000004A; };
 		A10000000000000000000011 = {
 			isa = PBXFileReference;
 			explicitFileType = wrapper.application;
@@ -19,6 +20,7 @@
 			sourceTree = BUILT_PRODUCTS_DIR;
 		};
 		A10000000000000000000030 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = App.swift; sourceTree = "<group>"; };
+		A1000000000000000000004A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Purchase.swift; path = ../shared/Purchase.swift; sourceTree = "<group>"; };
 		A10000000000000000000032 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebScreen.swift; sourceTree = "<group>"; };
 		A10000000000000000000034 = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BleClient.swift; sourceTree = "<group>"; };
 		A10000000000000000000036 = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
@@ -119,6 +121,7 @@
 				A10000000000000000000031,
 				A10000000000000000000033,
 				A10000000000000000000035,
+				A1000000000000000000004B,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -164,6 +167,7 @@
 				DEVELOPMENT_TEAM = QZZ878S3NS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) APPSTORE";
 				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
@@ -186,6 +190,7 @@
 				DEVELOPMENT_TEAM = QZZ878S3NS;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = BoseControl/Info.plist;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "$(inherited) APPSTORE";
 				INFOPLIST_KEY_CFBundleDisplayName = "Bose Connector";
 				INFOPLIST_KEY_ITSAppUsesNonExemptEncryption = NO;
 				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";

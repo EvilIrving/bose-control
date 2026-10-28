@@ -80,6 +80,7 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     private static let handlerNames = [
         "bleScan", "bleConnect", "sendData", "bleDisconnect",
         "exportDiag", "bootError", "appReady", "diagLog",
+        "purchase", "restorePurchase",
     ]
 
     private var web: WKWebView!
@@ -387,6 +388,20 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
             if let text = message.body as? String {
                 Diag.fail("页面启动错误 \(text)", stage: "A")
             }
+        case "purchase":
+            Task { @MainActor in
+                let result = await Purchase.purchase()
+                Diag.log("购买结果 \(result)", stage: "A")
+                pushStoreState()
+                js("onPurchaseResult(\"\(result)\")")
+            }
+        case "restorePurchase":
+            Task { @MainActor in
+                let owned = await Purchase.restore()
+                Diag.log("恢复购买 \(owned)", stage: "A")
+                pushStoreState()
+                js("onPurchaseResult(\"\(owned ? "purchased" : "cancelled")\")")
+            }
         case "appReady":
             let raw = (message.body as? String) ?? "{}"
             let data = raw.data(using: .utf8) ?? Data()
@@ -396,6 +411,8 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
             let elapsed = info["elapsedMs"] as? Int ?? -1
             if ok {
                 Diag.log("页面已就绪（\(why) \(elapsed)ms）", stage: "A")
+                // iOS 只经 App Store / TestFlight 分发，所以恒为商店版。
+                pushStoreState()
             } else {
                 Diag.fail("页面没有就绪（触发=\(why) 耗时=\(elapsed)ms，见上面的启动错误）", stage: "A")
                 offerNativeExport(reason: "页面没有就绪（\(why) \(elapsed)ms）")
@@ -415,6 +432,15 @@ final class WebController: UIViewController, WKScriptMessageHandler, WKNavigatio
     private func jsonText(_ payload: [String: Any]) -> String {
         let data = (try? JSONSerialization.data(withJSONObject: payload)) ?? Data("{}".utf8)
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    private func pushStoreState() {
+        guard Purchase.showsStorefront else { return }
+        Task { @MainActor in
+            let owned = await Purchase.isPurchased()
+            let json = owned ? "{\\\"store\\\":true,\\\"owned\\\":true}" : "{\\\"store\\\":true,\\\"owned\\\":false}"
+            js("window.onStoreInfo && window.onStoreInfo('\(json)')")
+        }
     }
 
     private func js(_ code: String) {

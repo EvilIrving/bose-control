@@ -10,6 +10,7 @@
 		B20000000000000000000035 = {isa = PBXBuildFile; fileRef = B20000000000000000000034; };
 		B20000000000000000000037 = {isa = PBXBuildFile; fileRef = B20000000000000000000036; };
 		B20000000000000000000039 = {isa = PBXBuildFile; fileRef = B20000000000000000000038; };
+		B2000000000000000000004B = {isa = PBXBuildFile; fileRef = B2000000000000000000004A; };
 		B2000000000000000000003D = {isa = PBXBuildFile; fileRef = B2000000000000000000003C; };
 		B20000000000000000000041 = {isa = PBXBuildFile; fileRef = B20000000000000000000040; };
 		B20000000000000000000051 = {isa = PBXBuildFile; fileRef = B20000000000000000000050; };
@@ -30,6 +31,7 @@
 		B2000000000000000000003C = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		B2000000000000000000003E = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = "BoseControl-AppStore.entitlements"; sourceTree = "<group>"; };
 		B20000000000000000000040 = {isa = PBXFileReference; lastKnownFileType = folder; path = Web; sourceTree = "<group>"; };
+		B2000000000000000000004A = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; name = Purchase.swift; path = ../shared/Purchase.swift; sourceTree = "<group>"; };
 		B20000000000000000000050 = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		B20000000000000000000002 = {
 			isa = PBXGroup;
@@ -132,6 +134,7 @@
 				B20000000000000000000035,
 				B20000000000000000000037,
 				B20000000000000000000039,
+				B2000000000000000000004B,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

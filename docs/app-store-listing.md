@@ -47,7 +47,7 @@ Bose is a trademark of Bose Corporation. This app is not affiliated with or endo
 | --- | --- |
 | 主分类 | 工具 / Utilities |
 | 年龄分级 | 4+ |
-| 价格 | 免费（按实际决定） |
+| 价格 | App 本体免费，内购「支持开发」¥1 买断（非消耗型） |
 | 隐私政策 URL | `https://github.com/EvilIrving/bose-control/blob/main/docs/privacy.md` |
 | 支持 URL | `https://github.com/EvilIrving/bose-control/issues` |
 | 营销 URL | `https://github.com/EvilIrving/bose-control` |

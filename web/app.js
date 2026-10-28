@@ -68,6 +68,14 @@ import { hasNative, nativeCall } from "./native.js";
 import { createMenu } from "./menu.js";
 import { logCount, logLine, logSnapshot } from "./log.js";
 import { exportResult } from "./diag.js";
+import {
+  applyPurchaseResult,
+  beginPurchase,
+  dismissSupport,
+  purchaseState,
+  setStoreInfo,
+  shouldShowSupport,
+} from "./support.js";
 import { brandLogoSvg } from "./logos.js";
 
 let link = new HeadsetLink(brandById("bose").codec());
@@ -97,6 +105,8 @@ const ui = {
   settingsOpenHome: $("settings-open-home"),
   settingsClose: $("settings-close"),
   diagActions: $("diag-actions"),
+  supportSection: $("support-section"),
+  supportBody: $("support-body"),
   toggles: $("toggles"),
   standby: $("standby"),
   transport: $("transport"),
@@ -281,7 +291,14 @@ function exportDiag() {
     `页面日志 ${logCount()} 行（历史以原生持久文件为准）`,
   ];
   const snap = logSnapshot();
-  header.push(`页面落盘 ${snap.persisted ? "正常" : "不可用"}`,
+  header.push(`页面落盘 ${snap.persisted ? "正常" : "不可用"}`);
+  // 能力探测报告放在日志前面：用户报「连不上」时，第一眼要看的是
+  // 这台耳机到底回了什么，而不是 2000 行时间戳。
+  const probeReport = session?.diagReport?.();
+  if (probeReport) {
+    header.push("", probeReport, "");
+  }
+  header.push(
     `最近 20 行（仅快照，完整历史见下）`,
     ...snap.recent);
   const text = header.join("\n");
@@ -319,7 +336,67 @@ function renderSettings() {
   } else {
     hideDeviceSettings();
   }
+  renderSupport();
   renderDiag();
+}
+
+// 支持开发：只在商店版、未购买、且用户没点掉时出现。
+// 不弹窗、不拦截、不重复问。免费版功能完整，这里只是一个入口。
+function renderSupport() {
+  if (!ui.supportSection) return;
+  const show = shouldShowSupport();
+  ui.supportSection.hidden = !show;
+  if (!show) return;
+  const info = purchaseState();
+  ui.supportBody.replaceChildren();
+
+  const body = document.createElement("p");
+  body.className = "support-copy";
+  body.textContent = t("supportBody");
+  ui.supportBody.appendChild(body);
+
+  const row = document.createElement("div");
+  row.className = "chips";
+  const buy = chip(t("support"), false);
+  buy.disabled = info.busy;
+  buy.addEventListener("click", () => {
+    beginPurchase();
+    renderSupport();
+    try {
+      nativeCall("purchase");
+    } catch (err) {
+      // 桥不在就别把按钮留在加载态
+      applyPurchaseResult(`failed: ${err.message}`);
+      renderSupport();
+    }
+  });
+  const later = chip(t("supportLater"), false);
+  later.addEventListener("click", () => {
+    dismissSupport();
+    renderSupport();
+  });
+  row.append(buy, later);
+  ui.supportBody.appendChild(row);
+}
+
+// 原生在启动脚本里注入商店状态；直装版不调，默认不显示。
+window.onStoreInfo = (info) => {
+  setStoreInfo(typeof info === "string" ? safeJson(info) : info);
+  renderSupport();
+};
+
+window.onPurchaseResult = (result) => {
+  const outcome = applyPurchaseResult(result);
+  if (outcome.key) logLine(outcome.ok ? "app" : "err", t(outcome.key).replace("{detail}", outcome.detail ?? ""));
+  renderSupport();
+};
+
+function safeJson(text) {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return null;
+  }
 }
 
 function nativeEnv() {
@@ -340,6 +417,18 @@ function renderDiag() {
     const btn = chip(t("exportDiag"), false);
     btn.addEventListener("click", exportDiag);
     ui.diagActions.appendChild(btn);
+  }
+  // 探测结果先在界面上给一行。用户不用导出也能看出「这台耳机到底回了什么」，
+  // 而且能当场分辨是「没有这个功能」还是「设备一句话都没回」。
+  const rows = sessionLive() ? session?.diagRows?.() : null;
+  if (rows?.length) {
+    const box = document.createElement("div");
+    box.id = "diag-probe";
+    box.className = "diag-probe";
+    fillRows(box, rows);
+    ui.diagActions.after(box);
+  } else {
+    document.getElementById("diag-probe")?.remove();
   }
   const note = diagNote();
   if (note) note.textContent = canExport && diagExport ? exportText(diagExport) : "";

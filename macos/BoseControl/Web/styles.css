@@ -910,6 +910,29 @@ input.text:focus {
   word-break: break-all;
 }
 
+/* 能力探测摘要：和 diag-note 一样低调，只是多一行小字 */
+.diag-probe {
+  margin-top: 0.5rem;
+  color: var(--muted-foreground);
+  font-size: 0.78rem;
+}
+
+.diag-probe b {
+  color: var(--foreground);
+}
+
+/* 支持开发：一段说明 + 一排芯片，不弹窗、不抢焦点 */
+#support-body {
+  margin: 0;
+}
+
+.support-copy {
+  color: var(--muted-foreground);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  margin: 0 0 0.7rem;
+}
+
 /* 模式编辑器：每项一行，左边标签右边控件，顺序和设备页一致 */
 .edit-row {
   display: flex;
