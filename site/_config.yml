@@ -1,0 +1,18 @@
+title: Bose Connector
+description: 离线控制 Bose 耳机 / Control Bose headphones without an account
+url: https://evilirving.github.io
+baseurl: /bose-control
+
+markdown: kramdown
+kramdown:
+  input: GFM
+
+defaults:
+  - scope:
+      path: ""
+      type: pages
+    values:
+      layout: page
+
+exclude:
+  - README.md

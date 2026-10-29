@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="zh-Hans">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ page.title | default: site.title }}</title>
+<meta name="description" content="{{ site.description }}">
+<link rel="stylesheet" href="{{ '/assets/style.css' | relative_url }}">
+</head>
+<body>
+<main>
+{{ content }}
+</main>
+<footer>
+  <p>Bose Connector · <a href="{{ '/' | relative_url }}">首页</a> · <a href="{{ '/privacy.html' | relative_url }}">隐私政策</a> · <a href="https://github.com/EvilIrving/bose-control">源码</a></p>
+</footer>
+</body>
+</html>
