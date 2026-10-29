@@ -1,5 +1,4 @@
-// 付费入口的行为边界。这三条错了会直接伤到产品的立身之本：
-// 免费功能被锁、直装版冒出购买按钮、购买失败后按钮卡在加载态。
+// 付费入口的行为边界：直装版不出现购买按钮，失败后不能卡在加载态。
 import assert from "node:assert/strict";
 import test from "node:test";
 
@@ -12,6 +11,7 @@ const {
   purchaseState,
   resetSupportState,
   setStoreInfo,
+  shouldShowRestore,
   shouldShowSupport,
 } = await import("../web/support.js");
 
@@ -43,7 +43,7 @@ test("用户点掉之后本次运行不再出现，且不算失败", () => {
   reset();
 });
 
-test("购买成功即隐藏入口，并且不改动任何功能可用性", () => {
+test("购买成功即隐藏入口", () => {
   setStoreInfo({ store: true, owned: false });
   beginPurchase();
   assert.equal(purchaseState().busy, true);
@@ -93,11 +93,62 @@ test("不认识的返回值当失败处理，不能静默成功", () => {
   reset();
 });
 
-test("免费版功能不受购买状态影响：support 模块不提供任何功能开关", async () => {
+test("卸载重装后即使点掉买断，恢复购买仍在", () => {
+  setStoreInfo({ store: true, owned: false });
+  assert.equal(shouldShowRestore(), true);
+  dismissSupport();
+  assert.equal(shouldShowSupport(), false, "点掉之后不再推销");
+  assert.equal(shouldShowRestore(), true, "收据没回来时恢复入口必须还在");
+  reset();
+});
+
+test("恢复成功跟购买成功同一条路：owned，入口关掉", () => {
+  setStoreInfo({ store: true, owned: false });
+  beginPurchase();
+  const outcome = applyPurchaseResult("purchased");
+  assert.equal(outcome.ok, true);
+  assert.equal(purchaseState().owned, true);
+  assert.equal(shouldShowRestore(), false);
+  assert.equal(shouldShowSupport(), false);
+  reset();
+});
+
+test("恢复时这个 Apple ID 没买过，要说找不到，不能装成取消", () => {
+  setStoreInfo({ store: true, owned: false });
+  beginPurchase();
+  const outcome = applyPurchaseResult("notfound");
+  assert.equal(outcome.ok, false);
+  assert.equal(outcome.key, "supportRestoreEmpty");
+  assert.equal(purchaseState().owned, false);
+  assert.equal(purchaseState().busy, false);
+  assert.equal(shouldShowRestore(), true);
+  reset();
+});
+
+test("直装版不显示恢复购买", () => {
+  setStoreInfo({ store: false, owned: false });
+  assert.equal(shouldShowRestore(), false);
+  reset();
+});
+
+test("connect() 不读购买状态", async () => {
+  const src = await import("node:fs/promises").then((fs) =>
+    fs.readFile(new URL("../web/app.js", import.meta.url), "utf8")
+  );
+  const start = src.indexOf("async function connect");
+  const end = src.indexOf("\nfunction disconnect");
+  assert.ok(start >= 0 && end > start, "找不到 connect()");
+  assert.doesNotMatch(
+    src.slice(start, end),
+    /shouldShowSupport|beginPurchase|membershipLocked|iapStatus|nativeCall\("purchase/,
+    "connect() 里不能出现付费判断"
+  );
+});
+
+test("support 模块不导出功能开关", async () => {
   const mod = await import("../web/support.js");
   const exported = Object.keys(mod);
-  // 只允许查询展示 / 购买流程，不允许出现 isPro / canUseX 这类开关
   for (const name of exported) {
-    assert.doesNotMatch(name, /^(is|can|has)[A-Z]/, `${name} 看起来像功能开关，付费不该锁功能`);
+    assert.doesNotMatch(name, /^(is|can|has)[A-Z]/, `${name} 看起来像功能开关`);
   }
 });

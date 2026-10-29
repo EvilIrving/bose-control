@@ -103,6 +103,14 @@ test("#shortcut 只是容器，不自己吃样式", () => {
   assert.ok(!ownRule("shortcut"), "又给 #shortcut 加样式了，它会掉出 .chips 的横向滚动");
 });
 
+test("消噪滑轨和开关的间距在没有 overflow 的外壳上", () => {
+  assert.match(html, /id="cnc-stack"[\s\S]*id="cnc"[\s\S]*id="cnc-toggles"/);
+  const stack = rule("#cnc-stack");
+  assert.match(stack, /flex-direction:\s*column/);
+  assert.match(stack, /gap:\s*1rem/);
+  assert.ok(!/#cnc-toggles[^{]*\{[^}]*margin-top/.test(css), "间距又写回了 #cnc-toggles 的 margin-top，iOS 会吃掉");
+});
+
 function sectionTagFor(id) {
   const idx = html.indexOf(`id="${id}"`);
   assert.ok(idx > 0, `#${id} 不在页面里`);

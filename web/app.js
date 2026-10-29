@@ -74,6 +74,7 @@ import {
   dismissSupport,
   purchaseState,
   setStoreInfo,
+  shouldShowRestore,
   shouldShowSupport,
 } from "./support.js";
 import { brandLogoSvg } from "./logos.js";
@@ -340,42 +341,63 @@ function renderSettings() {
   renderDiag();
 }
 
-// 支持开发：只在商店版、未购买、且用户没点掉时出现。
-// 不弹窗、不拦截、不重复问。免费版功能完整，这里只是一个入口。
+// 永久会员：商店版、未购买时出现。「以后再说」只收起文案；恢复购买一直留着。
 function renderSupport() {
   if (!ui.supportSection) return;
-  const show = shouldShowSupport();
-  ui.supportSection.hidden = !show;
-  if (!show) return;
+  const showPromo = shouldShowSupport();
+  const showRestore = shouldShowRestore();
+  ui.supportSection.hidden = !showPromo && !showRestore;
+  if (!showPromo && !showRestore) return;
   const info = purchaseState();
   ui.supportBody.replaceChildren();
 
-  const body = document.createElement("p");
-  body.className = "support-copy";
-  body.textContent = t("supportBody");
-  ui.supportBody.appendChild(body);
+  if (showPromo) {
+    const body = document.createElement("p");
+    body.className = "support-copy";
+    body.textContent = t("supportBody");
+    ui.supportBody.appendChild(body);
+  }
 
   const row = document.createElement("div");
   row.className = "chips";
-  const buy = chip(t("supportBuy"), false);
-  buy.disabled = info.busy;
-  buy.addEventListener("click", () => {
-    beginPurchase();
-    renderSupport();
-    try {
-      nativeCall("purchase");
-    } catch (err) {
-      // 桥不在就别把按钮留在加载态
-      applyPurchaseResult(`failed: ${err.message}`);
+  if (showPromo) {
+    const buy = chip(t("supportBuy"), false);
+    buy.disabled = info.busy;
+    buy.addEventListener("click", () => {
+      beginPurchase();
       renderSupport();
-    }
-  });
-  const later = chip(t("supportLater"), false);
-  later.addEventListener("click", () => {
-    dismissSupport();
-    renderSupport();
-  });
-  row.append(buy, later);
+      try {
+        nativeCall("purchase");
+      } catch (err) {
+        applyPurchaseResult(`failed: ${err.message}`);
+        renderSupport();
+      }
+    });
+    row.append(buy);
+  }
+  if (showRestore) {
+    const restore = chip(t("supportRestore"), false);
+    restore.disabled = info.busy;
+    restore.addEventListener("click", () => {
+      beginPurchase();
+      renderSupport();
+      try {
+        nativeCall("restorePurchase");
+      } catch (err) {
+        applyPurchaseResult(`failed: ${err.message}`);
+        renderSupport();
+      }
+    });
+    row.append(restore);
+  }
+  if (showPromo) {
+    const later = chip(t("supportLater"), false);
+    later.addEventListener("click", () => {
+      dismissSupport();
+      renderSupport();
+    });
+    row.append(later);
+  }
   ui.supportBody.appendChild(row);
 }
 
@@ -417,18 +439,6 @@ function renderDiag() {
     const btn = chip(t("exportDiag"), false);
     btn.addEventListener("click", exportDiag);
     ui.diagActions.appendChild(btn);
-  }
-  // 探测结果先在界面上给一行。用户不用导出也能看出「这台耳机到底回了什么」，
-  // 而且能当场分辨是「没有这个功能」还是「设备一句话都没回」。
-  const rows = sessionLive() ? session?.diagRows?.() : null;
-  if (rows?.length) {
-    const box = document.createElement("div");
-    box.id = "diag-probe";
-    box.className = "diag-probe";
-    fillRows(box, rows);
-    ui.diagActions.after(box);
-  } else {
-    document.getElementById("diag-probe")?.remove();
   }
   const note = diagNote();
   if (note) note.textContent = canExport && diagExport ? exportText(diagExport) : "";

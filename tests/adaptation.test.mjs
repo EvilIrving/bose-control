@@ -238,7 +238,12 @@ test("按机型表跳过的项也记一笔，不能和「问了没回」混为�
   assert.match(text, /机型表 qc35 标记跳过/, `跳过的原因要写清：\n${text.slice(0, 900)}`);
 });
 
-test("设置页的探测摘要不用导出也能看", async () => {
+test("探测摘要只进导出文本，不在设置页上画", async () => {
+  const { readFileSync } = await import("node:fs");
+  const { fileURLToPath } = await import("node:url");
+  const { dirname, join } = await import("node:path");
+  const app = readFileSync(join(dirname(fileURLToPath(import.meta.url)), "../web/app.js"), "utf8");
+  assert.ok(!/session\?\.diagRows/.test(app), "设置页又把 diagRows 画出来了");
   const state = { info: {}, eq: [], battery: [], cfg: {}, modesAll: [] };
   const session = createBoseSession({
     state, ui: {}, refresh() {}, log() {},
@@ -253,8 +258,6 @@ test("设置页的探测摘要不用导出也能看", async () => {
     },
   });
   await session.load();
-  const rows = session.diagRows();
-  assert.ok(rows.some(([k]) => k === "机型"), JSON.stringify(rows));
-  assert.ok(rows.some(([k, v]) => k === "探测" && v.includes("通")), JSON.stringify(rows));
-  assert.ok(rows.some(([k, v]) => k === "可用" && v.includes("31.10")), JSON.stringify(rows));
+  const report = session.diagReport();
+  assert.match(report, /31\.10/, "导出报告里还要有探测结论");
 });

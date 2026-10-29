@@ -73,6 +73,10 @@ export function createBoseSession({ link, ui, state, refresh, log }) {
 // 机型差异全部来自这张表（web/profiles.js）。一开始用 DEFAULT：产品 ID 还没读到，
 // 先按最全的能力去问，谁回包就显示谁；读到 0.3 之后再换成这台耳机真正的布局。
 let profile = DEFAULT_PROFILE;
+// 拖消噪时不要让回包 / 写完成把滑轨 DOM 拆掉重装，否则指针丢了、旧值又盖回来。
+let cncGesture = false;
+let cncBusy = false;
+let cncWanted = null;
 // 连上后先发的探路包（QC35 / QC45 不发就不回别的东西），由 loadDevice 发。
 let inited = false;
 // 能力探测报告：每条命令的 tx/rx 原文 + 结论。导出诊断时一并带出，
@@ -270,7 +274,7 @@ function cncShown() {
   return 0;
 }
 
-function slider(row, { min, max, value, onChange }) {
+function slider(row, { min, max, value, onChange, live }) {
   const track = document.createElement("div");
   track.className = "track";
   const rail = document.createElement("div");
@@ -300,6 +304,7 @@ function slider(row, { min, max, value, onChange }) {
   };
   track.addEventListener("pointerdown", (ev) => {
     held = true;
+    if (live) cncGesture = true;
     track.setPointerCapture(ev.pointerId);
     apply(ev.clientX);
   });
@@ -308,6 +313,7 @@ function slider(row, { min, max, value, onChange }) {
   });
   const flush = () => {
     held = false;
+    if (live) cncGesture = false;
     if (!sendAt) return;
     clearTimeout(sendAt);
     send();
@@ -345,6 +351,7 @@ function renderCnc() {
     max,
     value: Math.min(cncShown(), max),
     onChange: setCnc,
+    live: true,
   });
 }
 
@@ -1260,31 +1267,47 @@ async function setStandby(minutes) {
 // 写消噪时也按同一张表的优先级选路，不能拿“先试哪条”当成猜。
 // 与读的区别：写失败了要能回退到下一条，写成功了不再问。
 async function setCnc(level) {
+  cncWanted = level;
+  if (cncBusy) return;
+  cncBusy = true;
+  try {
+    while (cncWanted != null && link.active !== false) {
+      const next = cncWanted;
+      cncWanted = null;
+      const ok = await writeCnc(next);
+      if (!ok) {
+        log(`setCnc ${next} 失败：这台耳机没有可用的消噪写入路径`);
+        if (!cncGesture) renderCnc();
+        return;
+      }
+      if (state.cnc) state.cnc.step = next;
+      else state.cnc = { steps: cncMax() + 1, step: next, total: cncMax() + 1, enabled: true };
+      state.cfg.cnc = next;
+      renderCncToggles();
+    }
+  } finally {
+    cncBusy = false;
+  }
+}
+
+async function writeCnc(level) {
   const order = profile.cnc ?? [];
   // 自动消噪开着的时候手动等级不会生效：拖滑轨就当成「我要手动」，把 auto 一起关掉
   if (order.includes("audioSettings")) {
     if (state.cfg.auto) {
-      if (await writeAudioSettings({ ...state.cfg, cnc: level, auto: false, anc: true })) return done(level);
+      if (await writeAudioSettings({ ...state.cfg, cnc: level, auto: false, anc: true })) return true;
     } else if (await writeAudioSettings({ ...state.cfg, cnc: level, anc: true })) {
-      return done(level);
+      return true;
     }
   }
   if (order.includes("cncDirect")) {
-    const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪", 800);
+    const reply = await writeAsk(setGet(FBLOCK.SETTINGS, FUNC.CNC, cncPayload(level, 1)), "降噪");
     if (reply) {
       state.cncPath = "cncDirect";
-      return done(level);
+      return true;
     }
-  }  log(`setCnc ${level} 失败：这台耳机没有可用的消噪写入路径`);
-  return;
-
-  function done(value) {
-    if (state.cnc) state.cnc.step = value;
-    else state.cnc = { steps: cncMax() + 1, step: value, total: cncMax() + 1, enabled: true };
-    state.cfg.cnc = value;
-    renderCnc();
-    renderCncToggles();
   }
+  return false;
 }
 
 // QC35 / QC45：一字节枚举直接写回，写完读一次确认。
@@ -1375,6 +1398,7 @@ async function setAutoPlayPause(on) {
         state.name = parseName(packet.payload) || state.name;
         break;
       case "1.5": // CNC 被机身按钮改了
+        if (cncGesture || cncBusy) return;
         if (state.cncPath !== "anr") {
           applyCnc(packet);
           return;
@@ -1396,6 +1420,7 @@ async function setAutoPlayPause(on) {
         }
         return;
       case "31.10": // 消噪 / 空间音频 / 风噪被别的控制端改了
+        if (cncGesture || cncBusy) return;
         applyCfg(packet);
         return;
       default:

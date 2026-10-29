@@ -107,6 +107,20 @@ test("断开后旧请求结算不能扩大下一轮并发窗口", async () => {
   assert.equal(count, 4);
 });
 
+test("在途请求的回包不走 onPacket，避免刚写的值被旧 STATUS 盖回去", async () => {
+  const { link } = await harness();
+  const seen = [];
+  link.onPacket = (packet) => seen.push(packet.func);
+  const job = link.request(ask(1, 5), 200);
+  await tick();
+  link.handleNotify(reply(1, 5, [2]));
+  await job;
+  assert.deepEqual(seen, []);
+  link.handleNotify(reply(1, 5, [9]));
+  assert.deepEqual(seen, [5]);
+  link.dispose();
+});
+
 test("写失败的等待项不能吞掉下一次同命令回包", async () => {
   const { link } = await harness();
   const write = link.write.bind(link);

@@ -1,13 +1,6 @@
 // 付款入口。只在原生宿主明确告知「这是商店版」时出现。
-//
-// 三条硬规则，都来自同一个判断：这个 App 的卖点是「不联网、不要账号」，
-// 所以付费这件事不能反过来变成新的打扰。
-//
-// 1. **免费版完整可用。** 不锁任何功能。¥1 是支持开发，不是解锁。
-//    锁功能会把人推回 GitHub 免费下载，对开发者是负收益。
-// 2. **入口只出现一次，且可以关掉。** 不弹窗、不拦截、不重复问。
-//    用户点掉之后本次运行不再出现。
-// 3. **直装版完全不显示。** 由原生编译期决定，页面不自己猜。
+// 文案跟 ASC 一样叫永久会员，不写支持/捐赠。
+// 买断文案可以关掉，恢复购买不能关。直装版完全不显示，由原生编译期决定。
 
 const SUPPORT_HINT = "supportHint";
 
@@ -22,9 +15,14 @@ let state = {
   busy: false,
 };
 
-// 页面只看这个：要不要画那颗「支持开发」的芯片。
+// 页面只看这个：要不要画永久会员入口。
 export function shouldShowSupport() {
   return state.store && !state.owned && !state.dismissed;
+}
+
+// 卸载重装后本地收据可能还没到。点掉买断提醒之后，恢复购买仍要能找到。
+export function shouldShowRestore() {
+  return state.store && !state.owned;
 }
 
 export function purchaseState() {
@@ -54,6 +52,7 @@ export function applyPurchaseResult(result) {
   if (text === "cancelled") return { ok: false, key: "" };
   if (text === "pending") return { ok: false, key: "supportPending" };
   if (text === "missing") return { ok: false, key: "supportUnavailable" };
+  if (text === "notfound") return { ok: false, key: "supportRestoreEmpty" };
   if (text === "unsupported") return { ok: false, key: "" };
   if (text.startsWith("failed")) {
     return { ok: false, key: "supportFailed", detail: text.slice(7).trim() };

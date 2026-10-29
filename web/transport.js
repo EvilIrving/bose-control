@@ -283,7 +283,9 @@ export class HeadsetLink {
       { attemptId: this._token, event: waited ? "rx" : "unexpected-packet",
         level: waited ? "info" : "warn" });
       this.pending.get(key)?.finish(null, packet);
-      this.onPacket?.(packet);
+      // 在途请求的回包已经交给这条 request。再走 onPacket 会把刚写进去的值
+      // 用耳机还没改完的旧 STATUS 盖回去，消噪滑轨就会先弹回再跳到新值。
+      if (!waited) this.onPacket?.(packet);
     }
   }
 
