@@ -1,8 +1,8 @@
 # Bose Connector
 
-[![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml)
+[![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml) [![pages](https://img.shields.io/badge/website-GitHub%20Pages-blue)](https://evilirving.github.io/bose-control/)
 
-[English](README_en.md) · [简体中文](README.md)
+[🌐 官网与演示](https://evilirving.github.io/bose-control/) · [English](README_en.md) · [简体中文](README.md)
 
 不登录、不联网，用蓝牙直接控制 Bose 和华为耳机。
 
