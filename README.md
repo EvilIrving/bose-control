@@ -2,6 +2,8 @@
 
 [![android](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/android.yml) [![apple](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml/badge.svg)](https://github.com/EvilIrving/bose-control/actions/workflows/apple.yml)
 
+[English](README_en.md) · [简体中文](README.md)
+
 不登录、不联网，用蓝牙直接控制 Bose 和华为耳机。
 
 官方 App 要账号、要云、要定位权限。这里只做一件事：手机或电脑直连耳机，Bose 走私有的 BMAP 协议，华为走蓝牙串口（SPP），数据不出本机。
